@@ -132,8 +132,8 @@ flowchart LR
     H -->|Real Degradation| J[Expected - Monitor]
     H -->|Data Pipeline Bug| K[Fix Pipeline]
     
-    style D fill:#FFD700
-    style F fill:#FF6B6B
+    style D fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style F fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ```python

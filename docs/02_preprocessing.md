@@ -19,9 +19,9 @@ flowchart TD
     J --> K[Train/Val Split by Engine]
     K --> L[Ready for Training]
     
-    style A fill:#E8F4F8
-    style L fill:#90EE90
-    style F fill:#FFD700
+    style A fill:#E8F4F8,stroke:#333,stroke-width:2px,color:#000
+    style L fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style F fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -108,11 +108,11 @@ graph LR
     C -->|Linear Decrease| D[Cycle 150<br/>RUL=56]
     D --> E[Cycle 206<br/>RUL=0<br/>FAILURE]
     
-    style A fill:#E8F4F8
-    style B fill:#FFD700
-    style C fill:#FFD700
-    style D fill:#FFA500
-    style E fill:#FF6B6B
+    style A fill:#E8F4F8,stroke:#333,stroke-width:2px,color:#000
+    style B fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style C fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style D fill:#FFA500,stroke:#333,stroke-width:2px,color:#000
+    style E fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
 ```
 
 Effect: RUL stays flat at 125 during healthy operation, then decreases linearly as the engine degrades. This is the piecewise linear RUL formulation used in most literature.

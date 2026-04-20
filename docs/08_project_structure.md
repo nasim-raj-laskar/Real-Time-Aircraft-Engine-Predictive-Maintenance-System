@@ -18,9 +18,9 @@ graph TD
     E --> E5[inference/]
     E --> E6[monitoring/]
     
-    style A fill:#FFD700
-    style E fill:#90EE90
-    style F fill:#FF6B6B
+    style A fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style E fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style F fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ```
@@ -118,12 +118,12 @@ flowchart TD
     S5 -.->|Target| T5[API Latency < 15ms]
     S6 -.->|Target| T6[Dashboards Live]
     
-    style S1 fill:#E8F4F8
-    style S2 fill:#D4E8F4
-    style S3 fill:#C0D8F0
-    style S4 fill:#ACC8EC
-    style S5 fill:#98B8E8
-    style S6 fill:#90EE90
+    style S1 fill:#E8F4F8,stroke:#333,stroke-width:2px,color:#000
+    style S2 fill:#D4E8F4,stroke:#333,stroke-width:2px,color:#000
+    style S3 fill:#C0D8F0,stroke:#333,stroke-width:2px,color:#000
+    style S4 fill:#ACC8EC,stroke:#333,stroke-width:2px,color:#000
+    style S5 fill:#98B8E8,stroke:#333,stroke-width:2px,color:#000
+    style S6 fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ### Stage 1 — Offline Baseline (No Streaming)

@@ -50,12 +50,12 @@ flowchart TB
     E --> M
     M --> L
     
-    style A fill:#E8F4F8
-    style C fill:#FFD700
-    style E fill:#90EE90
-    style H fill:#87CEEB
-    style I fill:#98FB98
-    style L fill:#DDA0DD
+    style A fill:#E8F4F8,stroke:#333,stroke-width:2px,color:#000
+    style C fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style E fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style H fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
+    style I fill:#98FB98,stroke:#333,stroke-width:2px,color:#000
+    style L fill:#DDA0DD,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -151,10 +151,10 @@ graph TB
     R --> E
     E --> G
     
-    style R fill:#FF6B6B
-    style S fill:#4169E1
-    style ML fill:#32CD32
-    style I fill:#FFD700
+    style R fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
+    style S fill:#4169E1,stroke:#333,stroke-width:2px,color:#fff
+    style ML fill:#32CD32,stroke:#333,stroke-width:2px,color:#000
+    style I fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -218,10 +218,10 @@ graph TB
     RD --> EVID
     EVID --> GRAF
     
-    style KF fill:#FFD700
-    style RD fill:#FF6B6B
-    style LB fill:#87CEEB
-    style GRAF fill:#DDA0DD
+    style KF fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style RD fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
+    style LB fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
+    style GRAF fill:#DDA0DD,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -277,9 +277,9 @@ flowchart LR
     G --> J
     I --> K
     
-    style E fill:#90EE90
-    style H fill:#87CEEB
-    style J fill:#FFD700
+    style E fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style H fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
+    style J fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -313,10 +313,10 @@ flowchart TD
     
     N --> P[Update Inference Service]
     
-    style G fill:#FFD700
-    style H fill:#FFA500
-    style N fill:#90EE90
-    style O fill:#FF6B6B
+    style G fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style H fill:#FFA500,stroke:#333,stroke-width:2px,color:#000
+    style N fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style O fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -357,10 +357,10 @@ flowchart TD
     
     U --> V[Log Metrics<br/>Prometheus]
     
-    style E fill:#90EE90
-    style L fill:#FFD700
-    style S fill:#FF6B6B
-    style T fill:#FF6B6B
+    style E fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style L fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style S fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
+    style T fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -411,8 +411,8 @@ flowchart TB
     F --> I
     I --> J
     
-    style E fill:#FFD700
-    style G fill:#DDA0DD
-    style H fill:#87CEEB
-    style J fill:#FF6B6B
+    style E fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style G fill:#DDA0DD,stroke:#333,stroke-width:2px,color:#000
+    style H fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
+    style J fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
 ```

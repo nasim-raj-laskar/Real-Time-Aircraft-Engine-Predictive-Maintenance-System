@@ -26,9 +26,9 @@ graph TD
     G --> H[Derive Failure Risk]
     H --> I[risk = 1 - RUL/125]
     
-    style C fill:#90EE90
-    style D fill:#87CEEB
-    style G fill:#FFD700
+    style C fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style D fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
+    style G fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -274,8 +274,8 @@ flowchart TD
     O --> P
     P --> Q[artifacts/]
     
-    style A fill:#E8F4F8
-    style K fill:#FFD700
-    style P fill:#90EE90
-    style Q fill:#90EE90
+    style A fill:#E8F4F8,stroke:#333,stroke-width:2px,color:#000
+    style K fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style P fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style Q fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
 ```

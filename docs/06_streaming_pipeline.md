@@ -18,9 +18,9 @@ flowchart TD
     F --> H[Inference Service]
     G --> I[Model Training]
     
-    style C fill:#FFD700
-    style F fill:#90EE90
-    style G fill:#87CEEB
+    style C fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style F fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style G fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -122,8 +122,8 @@ graph TD
     H --> J
     I --> J
     
-    style A fill:#FFD700
-    style J fill:#90EE90
+    style A fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style J fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---

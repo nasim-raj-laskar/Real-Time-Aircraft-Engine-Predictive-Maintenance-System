@@ -167,10 +167,10 @@ flowchart LR
     
     N --> O[Trigger Alert System]
     
-    style E fill:#87CEEB
-    style H fill:#FFD700
-    style N fill:#FF6B6B
-    style O fill:#FF6B6B
+    style E fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
+    style H fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style N fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
+    style O fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---

@@ -17,10 +17,10 @@ graph LR
     B --> D[FD004<br/>Complex]
     C --> D
     
-    style A fill:#90EE90
-    style B fill:#FFD700
-    style C fill:#FFD700
-    style D fill:#FF6B6B
+    style A fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style B fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style C fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style D fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---
@@ -74,9 +74,9 @@ graph TD
     D --> D3[RUL_FD003.txt]
     D --> D4[RUL_FD004.txt]
     
-    style B fill:#E8F4F8
-    style C fill:#FFF4E6
-    style D fill:#F0E6FF
+    style B fill:#E8F4F8,stroke:#333,stroke-width:2px,color:#000
+    style C fill:#FFF4E6,stroke:#333,stroke-width:2px,color:#000
+    style D fill:#F0E6FF,stroke:#333,stroke-width:2px,color:#000
 ```
 
 All files are space-separated, no header row, 26 columns.
@@ -170,11 +170,11 @@ graph LR
     E[Test Data] -.->|Ends Here| C
     D -.->|RUL Ground Truth| E
     
-    style A fill:#90EE90
-    style B fill:#FFD700
-    style C fill:#FFA500
-    style D fill:#FF6B6B
-    style E fill:#87CEEB
+    style A fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style B fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style C fill:#FFA500,stroke:#333,stroke-width:2px,color:#000
+    style D fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
+    style E fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ---

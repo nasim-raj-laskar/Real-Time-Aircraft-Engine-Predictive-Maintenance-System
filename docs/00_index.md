@@ -62,8 +62,8 @@ flowchart LR
     
     H --> I[08_project_structure.md]
     
-    style A fill:#90EE90
-    style I fill:#FFD700
+    style A fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+    style I fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ### Dataset facts
