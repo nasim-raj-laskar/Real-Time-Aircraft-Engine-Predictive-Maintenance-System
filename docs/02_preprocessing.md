@@ -4,6 +4,26 @@
 
 Raw C-MAPSS data cannot be fed directly into a model. This document covers every preprocessing step in order, with the reasoning behind each decision.
 
+```mermaid
+flowchart TD
+    A[Raw CSV Files] --> B[Load Data]
+    B --> C[Drop Useless Sensors]
+    C --> D[Compute RUL Labels]
+    D --> E[Clip RUL at 125]
+    E --> F{Dataset Type?}
+    F -->|FD001/FD003| G[Global Normalization]
+    F -->|FD002/FD004| H[Condition Clustering]
+    H --> I[Per-Condition Normalization]
+    G --> J[Rolling Window Features]
+    I --> J
+    J --> K[Train/Val Split by Engine]
+    K --> L[Ready for Training]
+    
+    style A fill:#E8F4F8
+    style L fill:#90EE90
+    style F fill:#FFD700
+```
+
 ---
 
 ## Step 1 — Load Raw Data
@@ -79,6 +99,20 @@ Clip RUL to a maximum value so the model focuses on the degradation window:
 RUL_CLIP = 125  # standard choice for C-MAPSS; tune per dataset
 
 train['RUL'] = train['RUL'].clip(upper=RUL_CLIP)
+```
+
+```mermaid
+graph LR
+    A[Cycle 1<br/>RUL=206] -->|Clipped| B[RUL=125]
+    B -->|Flat| C[Cycle 81<br/>RUL=125]
+    C -->|Linear Decrease| D[Cycle 150<br/>RUL=56]
+    D --> E[Cycle 206<br/>RUL=0<br/>FAILURE]
+    
+    style A fill:#E8F4F8
+    style B fill:#FFD700
+    style C fill:#FFD700
+    style D fill:#FFA500
+    style E fill:#FF6B6B
 ```
 
 Effect: RUL stays flat at 125 during healthy operation, then decreases linearly as the engine degrades. This is the piecewise linear RUL formulation used in most literature.

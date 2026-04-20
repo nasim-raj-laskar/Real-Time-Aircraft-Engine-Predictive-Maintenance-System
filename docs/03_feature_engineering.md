@@ -4,6 +4,26 @@
 
 Raw normalized sensor readings are a weak input signal on their own. Feature engineering extracts temporal patterns that reveal degradation trends. This document covers all feature types, their rationale, and implementation.
 
+```mermaid
+mindmap
+  root((Feature<br/>Engineering))
+    Raw Sensors
+      11 useful sensors
+      After dropping constants
+    Temporal Features
+      Rolling Mean
+      Rolling Std
+      Degradation Slope
+      EWMA
+    Degradation Indicators
+      Baseline Deviation
+      Cumulative Drift
+    Domain Features
+      Temperature Ratios
+      Pressure Efficiency
+      Coolant Ratios
+```
+
 ---
 
 ## Feature Categories
@@ -183,6 +203,24 @@ Validate this on your data using XGBoost feature importance after training.
 ## Feature Engineering for Streaming Inference
 
 In the real-time pipeline, features must be computed incrementally as new cycles arrive.
+
+```mermaid
+sequenceDiagram
+    participant K as Kafka Event
+    participant C as Consumer
+    participant R as Redis
+    participant M as Model
+    
+    K->>C: New cycle data
+    C->>R: Get rolling buffer (last 30 cycles)
+    C->>C: Append new cycle
+    C->>C: Compute rolling stats
+    C->>R: Get baseline (first 10 cycles)
+    C->>C: Compute deviation features
+    C->>R: Write feature vector
+    R->>M: Feature lookup at inference
+    M->>M: Predict RUL
+```
 
 For each new Kafka event (one cycle):
 1. Append to engine's rolling buffer in Redis (keep last 30 cycles)

@@ -4,6 +4,25 @@
 
 The streaming pipeline simulates real-time engine telemetry by replaying the C-MAPSS CSV files through Kafka, then processes each event to compute features and store them for inference.
 
+```mermaid
+flowchart TD
+    A[CSV Files<br/>train_FD001.txt] --> B[Kafka Producer<br/>Simulator]
+    B --> C[Kafka Topic<br/>engine_telemetry]
+    
+    C --> D[Feature Engineering<br/>Consumer]
+    C --> E[Offline Store<br/>Writer]
+    
+    D --> F[Redis<br/>Online Features]
+    E --> G[S3/Parquet<br/>Offline Store]
+    
+    F --> H[Inference Service]
+    G --> I[Model Training]
+    
+    style C fill:#FFD700
+    style F fill:#90EE90
+    style G fill:#87CEEB
+```
+
 ---
 
 ## Components
@@ -84,6 +103,27 @@ kafka-topics.sh --create \
 
 # Partition by engine_id (key) so all events for one engine go to the same partition
 # This ensures ordering per engine without global ordering
+```
+
+```mermaid
+graph TD
+    A[Kafka Topic<br/>engine_telemetry] --> B[Partition 0<br/>Engines 1,7,13...]
+    A --> C[Partition 1<br/>Engines 2,8,14...]
+    A --> D[Partition 2<br/>Engines 3,9,15...]
+    A --> E[Partition 3-5<br/>...]
+    
+    B --> F[Consumer 1]
+    C --> G[Consumer 2]
+    D --> H[Consumer 3]
+    E --> I[Consumers 4-6]
+    
+    F --> J[Redis]
+    G --> J
+    H --> J
+    I --> J
+    
+    style A fill:#FFD700
+    style J fill:#90EE90
 ```
 
 ---

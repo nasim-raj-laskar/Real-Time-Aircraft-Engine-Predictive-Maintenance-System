@@ -7,6 +7,26 @@ Production ML systems degrade silently. Monitoring covers three layers:
 2. Data health (sensor drift, feature distribution shift)
 3. Model health (prediction drift, confidence degradation)
 
+```mermaid
+mindmap
+  root((Monitoring<br/>Layers))
+    System Health
+      API Latency
+      Throughput
+      Error Rate
+      Resource Usage
+    Data Health
+      Sensor Drift
+      Feature Distribution
+      Missing Values
+      Staleness
+    Model Health
+      Prediction Drift
+      RMSE Degradation
+      Confidence Scores
+      Alert Frequency
+```
+
 ---
 
 ## Monitoring Stack
@@ -96,6 +116,25 @@ Panels:
 ### Feature Drift
 
 Compare current feature distributions against the training distribution baseline.
+
+```mermaid
+flowchart LR
+    A[Training Data<br/>Reference Distribution] --> C[Evidently<br/>Drift Report]
+    B[Last Hour<br/>Production Data] --> C
+    
+    C --> D{Drift Detected?}
+    D -->|No| E[Continue Monitoring]
+    D -->|Yes| F[Alert: Drift Share > 30%]
+    
+    F --> G[Investigate Root Cause]
+    G --> H{Cause?}
+    H -->|Sensor Calibration| I[Recalibrate Sensors]
+    H -->|Real Degradation| J[Expected - Monitor]
+    H -->|Data Pipeline Bug| K[Fix Pipeline]
+    
+    style D fill:#FFD700
+    style F fill:#FF6B6B
+```
 
 ```python
 # monitoring/drift_detector.py

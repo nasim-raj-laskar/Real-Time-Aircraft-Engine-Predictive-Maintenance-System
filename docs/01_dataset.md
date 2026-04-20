@@ -8,6 +8,23 @@ Original paper: *Damage Propagation Modeling for Aircraft Engine Run-to-Failure 
 
 ---
 
+## Dataset Complexity Progression
+
+```mermaid
+graph LR
+    A[FD001<br/>Simple] --> B[FD002<br/>Multi-Condition]
+    A --> C[FD003<br/>Multi-Fault]
+    B --> D[FD004<br/>Complex]
+    C --> D
+    
+    style A fill:#90EE90
+    style B fill:#FFD700
+    style C fill:#FFD700
+    style D fill:#FF6B6B
+```
+
+---
+
 ## Sub-Datasets Overview
 
 | Dataset | Train Engines | Test Engines | Operating Conditions | Fault Modes |
@@ -36,21 +53,30 @@ Original paper: *Damage Propagation Modeling for Aircraft Engine Run-to-Failure 
 
 ## File Structure
 
-```
-Dataset/
-├── train_FD001.txt     # Training telemetry, engines run to failure
-├── train_FD002.txt
-├── train_FD003.txt
-├── train_FD004.txt
-├── test_FD001.txt      # Test telemetry, truncated before failure
-├── test_FD002.txt
-├── test_FD003.txt
-├── test_FD004.txt
-├── RUL_FD001.txt       # Ground truth RUL at last test cycle (one value per engine)
-├── RUL_FD002.txt
-├── RUL_FD003.txt
-├── RUL_FD004.txt
-└── readme.txt
+```mermaid
+graph TD
+    A[Dataset/] --> B[Training Files]
+    A --> C[Test Files]
+    A --> D[RUL Ground Truth]
+    
+    B --> B1[train_FD001.txt<br/>Run to failure]
+    B --> B2[train_FD002.txt]
+    B --> B3[train_FD003.txt]
+    B --> B4[train_FD004.txt]
+    
+    C --> C1[test_FD001.txt<br/>Truncated before failure]
+    C --> C2[test_FD002.txt]
+    C --> C3[test_FD003.txt]
+    C --> C4[test_FD004.txt]
+    
+    D --> D1[RUL_FD001.txt<br/>One value per engine]
+    D --> D2[RUL_FD002.txt]
+    D --> D3[RUL_FD003.txt]
+    D --> D4[RUL_FD004.txt]
+    
+    style B fill:#E8F4F8
+    style C fill:#FFF4E6
+    style D fill:#F0E6FF
 ```
 
 All files are space-separated, no header row, 26 columns.
@@ -129,6 +155,26 @@ RUL_FD001.txt: 100 values, min=7, max=145, mean=75.5
 RUL_FD002.txt: 259 values, min=6, max=194, mean=81.2
 RUL_FD003.txt: 100 values, min=6, max=145, mean=75.3
 RUL_FD004.txt: 248 values, min=6, max=195, mean=86.6
+```
+
+---
+
+## Engine Lifecycle Visualization
+
+```mermaid
+graph LR
+    A[Cycle 1<br/>Healthy] -->|Gradual Degradation| B[Cycle 100<br/>Wear Visible]
+    B -->|Accelerating| C[Cycle 180<br/>Critical]
+    C -->|Final Cycles| D[Cycle 206<br/>FAILURE]
+    
+    E[Test Data] -.->|Ends Here| C
+    D -.->|RUL Ground Truth| E
+    
+    style A fill:#90EE90
+    style B fill:#FFD700
+    style C fill:#FFA500
+    style D fill:#FF6B6B
+    style E fill:#87CEEB
 ```
 
 ---

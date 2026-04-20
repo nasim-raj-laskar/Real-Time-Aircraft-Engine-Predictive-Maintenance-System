@@ -2,6 +2,27 @@
 
 ## Recommended Directory Layout
 
+```mermaid
+graph TD
+    A[Project Root] --> B[Dataset/]
+    A --> C[docs/]
+    A --> D[notebooks/]
+    A --> E[src/]
+    A --> F[artifacts/]
+    A --> G[tests/]
+    
+    E --> E1[preprocessing/]
+    E --> E2[features/]
+    E --> E3[training/]
+    E --> E4[streaming/]
+    E --> E5[inference/]
+    E --> E6[monitoring/]
+    
+    style A fill:#FFD700
+    style E fill:#90EE90
+    style F fill:#FF6B6B
+```
+
 ```
 Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 │
@@ -81,6 +102,29 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 ## Build Order
 
 Follow this sequence. Each stage validates the previous one before adding complexity.
+
+```mermaid
+flowchart TD
+    S1[Stage 1<br/>Offline Baseline] --> S2[Stage 2<br/>Improve Model]
+    S2 --> S3[Stage 3<br/>Generalize to All Datasets]
+    S3 --> S4[Stage 4<br/>Streaming Infrastructure]
+    S4 --> S5[Stage 5<br/>Inference Service]
+    S5 --> S6[Stage 6<br/>Monitoring]
+    
+    S1 -.->|Target| T1[RMSE < 20]
+    S2 -.->|Target| T2[RMSE < 15]
+    S3 -.->|Target| T3[4 Models Trained]
+    S4 -.->|Target| T4[Kafka + Redis Running]
+    S5 -.->|Target| T5[API Latency < 15ms]
+    S6 -.->|Target| T6[Dashboards Live]
+    
+    style S1 fill:#E8F4F8
+    style S2 fill:#D4E8F4
+    style S3 fill:#C0D8F0
+    style S4 fill:#ACC8EC
+    style S5 fill:#98B8E8
+    style S6 fill:#90EE90
+```
 
 ### Stage 1 — Offline Baseline (No Streaming)
 

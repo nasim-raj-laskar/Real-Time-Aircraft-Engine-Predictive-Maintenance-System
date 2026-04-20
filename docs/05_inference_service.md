@@ -8,6 +8,24 @@ The inference service is a FastAPI application that:
 3. Loads the model and runs prediction
 4. Returns RUL and failure risk
 
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as FastAPI
+    participant Redis
+    participant Model
+    
+    Client->>API: POST /predict {engine_id: 12}
+    API->>Redis: GET engine:12:features
+    Redis-->>API: [feature_vector]
+    API->>Model: predict(features)
+    Model-->>API: RUL = 38.2
+    API->>API: risk = 1 - (38.2/125) = 0.70
+    API-->>Client: {rul: 38, risk: 0.70, level: HIGH}
+    
+    Note over API,Model: Latency < 15ms
+```
+
 ---
 
 ## API Contract
@@ -130,29 +148,29 @@ def write_features(engine_id: int, feature_vector: np.ndarray, r: redis.Redis):
 
 ## Inference Flow (End-to-End)
 
-```
-Kafka Event (new cycle)
-        │
-        ▼
-Feature Engineering Service
-  ├─ append to Redis buffer (last 30 cycles)
-  ├─ compute rolling mean/std/slope
-  ├─ compute deviation from baseline
-  ├─ assemble feature vector
-  └─ write to Redis: engine:{id}:features
-        │
-        ▼
-POST /predict  ← called by monitoring dashboard or alert system
-  ├─ read features from Redis
-  ├─ model.predict(features)
-  ├─ compute risk score
-  └─ return response
-        │
-        ▼
-Store prediction in Redis history
-        │
-        ▼
-If risk_level == CRITICAL → trigger alert
+```mermaid
+flowchart LR
+    A[Kafka Event<br/>New Cycle] --> B[Feature Engineering<br/>Service]
+    B --> C[Compute Rolling Stats]
+    C --> D[Compute Deviation]
+    D --> E[Redis Write<br/>engine:id:features]
+    
+    F[POST /predict] --> G[Redis Read<br/>Features]
+    G --> H[Model Inference]
+    H --> I[Compute Risk Score]
+    I --> J{Risk Level?}
+    
+    J -->|< 0.3| K[LOW - No Action]
+    J -->|0.3-0.6| L[MEDIUM - Monitor]
+    J -->|0.6-0.8| M[HIGH - Schedule Maintenance]
+    J -->|> 0.8| N[CRITICAL - Alert]
+    
+    N --> O[Trigger Alert System]
+    
+    style E fill:#87CEEB
+    style H fill:#FFD700
+    style N fill:#FF6B6B
+    style O fill:#FF6B6B
 ```
 
 ---

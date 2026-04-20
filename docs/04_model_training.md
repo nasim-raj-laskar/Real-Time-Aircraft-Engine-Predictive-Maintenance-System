@@ -11,6 +11,26 @@ The system produces two outputs:
 
 Start with RUL regression. Failure risk can be derived from RUL without a separate model.
 
+```mermaid
+graph TD
+    A[Preprocessed Data] --> B{Model Type?}
+    B -->|Tree-Based| C[XGBoost/LightGBM]
+    B -->|Deep Learning| D[LSTM]
+    
+    C --> E[Flat Features<br/>Rolling Stats]
+    D --> F[Sequences<br/>30 x 11]
+    
+    E --> G[RUL Prediction]
+    F --> G
+    
+    G --> H[Derive Failure Risk]
+    H --> I[risk = 1 - RUL/125]
+    
+    style C fill:#90EE90
+    style D fill:#87CEEB
+    style G fill:#FFD700
+```
+
 ---
 
 ## Evaluation Metrics
@@ -230,22 +250,32 @@ Production → deploy to inference service
 
 ## Training Pipeline Summary
 
-```
-train_FD001.txt
-    │
-    ├─ load_data()
-    ├─ drop_useless_sensors()
-    ├─ add_rul()
-    ├─ clip_rul(125)
-    ├─ normalize(fit scaler → save)
-    ├─ add_rolling_features()
-    ├─ group_split(train/val by engine)
-    │
-    ├─ XGBoost.fit(X_train, y_train)
-    ├─ evaluate(X_val, y_val) → RMSE, NASA score
-    ├─ mlflow.log_model()
-    │
-    └─ artifacts/
-        ├─ model.pkl
-        └─ scaler.pkl
+```mermaid
+flowchart TD
+    A[train_FD001.txt] --> B[load_data]
+    B --> C[drop_useless_sensors]
+    C --> D[add_rul]
+    D --> E[clip_rul at 125]
+    E --> F[normalize]
+    F --> G[add_rolling_features]
+    G --> H[group_split train/val]
+    
+    H --> I[XGBoost.fit]
+    I --> J[evaluate on val]
+    J --> K{RMSE < 18?}
+    K -->|No| L[Tune Hyperparameters]
+    L --> I
+    K -->|Yes| M[Test on held-out set]
+    
+    M --> N[mlflow.log_model]
+    F --> O[Save Scaler]
+    
+    N --> P[Model Registry]
+    O --> P
+    P --> Q[artifacts/]
+    
+    style A fill:#E8F4F8
+    style K fill:#FFD700
+    style P fill:#90EE90
+    style Q fill:#90EE90
 ```
