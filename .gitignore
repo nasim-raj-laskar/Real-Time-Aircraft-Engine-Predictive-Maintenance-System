@@ -6,3 +6,4 @@ venv
 __pycache__/
 creds.txt
 accessKeys.csv
+logs/
