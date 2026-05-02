@@ -1,0 +1,7 @@
+from pathlib import Path
+import yaml
+
+CONFIG: Path = Path("config/config.yaml")
+PARAMS: Path = Path("config/params.yaml")
+SCHEMA: Path = Path("config/schema.yaml")
+MODELS: Path = Path("config/model.yaml")
