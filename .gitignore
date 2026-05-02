@@ -5,3 +5,4 @@ venv
 *.pyc
 __pycache__/
 creds.txt
+accessKeys.csv
