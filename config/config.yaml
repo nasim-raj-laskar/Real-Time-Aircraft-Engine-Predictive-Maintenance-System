@@ -1,0 +1,13 @@
+artifacts_root: artifacts
+
+data_ingestion:
+  root_dir: artifacts/data_ingestion
+  s3_bucket: aircraft-engine-data
+  s3_keys:
+    train: bronze/train_FD001.txt
+    test: bronze/test_FD001.txt
+    rul: bronze/RUL_FD001.txt
+  local_data_dir: artifacts/data_ingestion/data
+
+
+
