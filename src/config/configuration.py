@@ -1,6 +1,6 @@
 from pathlib import Path
 from src.utils.common import *
-from src.entity.config_entity import DataIngestionConfig
+from src.entity.config_entity import *
 from src.constants import *
 from dotenv import load_dotenv
 import os
@@ -35,3 +35,19 @@ class ConfigurationManager:
         )
 
         return data_ingestion_config
+    
+    def get_data_validation_config(self) -> DataValidationConfig:
+        config = self.config.data_validation
+        schema = self.schema.data_validation
+
+        create_directories([config.root_dir])
+
+        data_validation_config = DataValidationConfig(
+            root_dir=Path(config.root_dir),
+            data_dir=Path(config.data_dir),
+            status_file=Path(config.status_file),
+            expected_columns=schema.expected_columns,
+            column_names=schema.column_names
+        )
+
+        return data_validation_config
