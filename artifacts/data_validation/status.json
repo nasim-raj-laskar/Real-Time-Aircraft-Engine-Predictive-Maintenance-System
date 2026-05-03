@@ -1,0 +1,8 @@
+{
+    "status": "passed",
+    "validated_files": [
+        "RUL_FD001.txt",
+        "test_FD001.txt",
+        "train_FD001.txt"
+    ]
+}
