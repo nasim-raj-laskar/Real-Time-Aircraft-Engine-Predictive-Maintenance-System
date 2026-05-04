@@ -62,7 +62,7 @@ class ConfigurationManager:
 #------------------------------Data Transformation Configurations---------------------------------
     def get_data_transformation_config(self) -> DataTransformationConfig:
         config = self.config.data_transformation
-        transform = self.params.transformation
+        transform = self.transform.transformation
 
         create_directories([config.root_dir, config.processed_dir])
 
@@ -79,3 +79,5 @@ class ConfigurationManager:
             keep_sensors=transform.keep_sensors,
             rul_clip=transform.rul_clip
         )
+
+        return data_transformation_config
