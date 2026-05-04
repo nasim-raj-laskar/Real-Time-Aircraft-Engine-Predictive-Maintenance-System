@@ -17,4 +17,8 @@ data_validation:
 data_transformation:
   root_dir: artifacts/data_transformation
   data_dir: artifacts/data_ingestion/data
-  transformed_data_dir: artifacts
+  processed_dir: artifacts/data_transformation/processed
+  s3_silver_prefix: silver/
+  train_output: train_processed.parquet
+  test_output: test_processed.parquet
+  scaler_path: artifacts/data_transformation/scaler.pkl

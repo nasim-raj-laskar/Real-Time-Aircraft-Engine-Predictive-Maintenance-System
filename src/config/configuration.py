@@ -13,12 +13,17 @@ class ConfigurationManager:
         config_filepath=CONFIG,
         params_filepath=PARAMS,
         schema_filepath=SCHEMA,
-        models_filepath=MODELS):
+        models_filepath=MODELS,
+        transform_filepath=TRANSFORM,
+        features_filepath=FEATURES
+):
 
         self.config = read_yaml(config_filepath)
         self.params = read_yaml(params_filepath)
         self.schema = read_yaml(schema_filepath)
         self.models = read_yaml(models_filepath)
+        self.transform = read_yaml(transform_filepath)
+        self.features = read_yaml(features_filepath)
 
         create_directories([self.config.artifacts_root])
 
@@ -53,3 +58,24 @@ class ConfigurationManager:
         )
 
         return data_validation_config
+    
+#------------------------------Data Transformation Configurations---------------------------------
+    def get_data_transformation_config(self) -> DataTransformationConfig:
+        config = self.config.data_transformation
+        transform = self.params.transformation
+
+        create_directories([config.root_dir, config.processed_dir])
+
+        data_transformation_config=DataTransformationConfig(
+            root_dir=Path(config.root_dir),
+            data_dir=Path(config.data_dir),
+            processed_dir=Path(config.processed_dir),
+            s3_bucket=os.getenv("AWS_S3_BUCKET"),
+            s3_silver_prefix=config.s3_silver_prefix,
+            train_output=config.train_output,
+            test_output=config.test_output,
+            scaler_path=Path(config.scaler_path),
+            drop_columns=transform.drop_columns,
+            keep_sensors=transform.keep_sensors,
+            rul_clip=transform.rul_clip
+        )
