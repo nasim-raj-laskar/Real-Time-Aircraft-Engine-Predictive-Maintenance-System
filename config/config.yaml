@@ -13,3 +13,12 @@ data_validation:
   root_dir: artifacts/data_validation
   data_dir: artifacts/data_ingestion/data
   status_file: artifacts/data_validation/status.json
+
+data_transformation:
+  root_dir: artifacts/data_transformation
+  data_dir: artifacts/data_ingestion/data
+  processed_dir: artifacts/data_transformation/processed
+  s3_silver_prefix: silver/
+  train_output: train_processed.parquet
+  test_output: test_processed.parquet
+  scaler_path: artifacts/data_transformation/scaler.pkl
