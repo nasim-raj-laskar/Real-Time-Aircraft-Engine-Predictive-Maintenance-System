@@ -22,6 +22,7 @@ class ConfigurationManager:
 
         create_directories([self.config.artifacts_root])
 
+#------------------------------Data Ingestion Configurations---------------------------------
     def get_data_ingestion_config(self) -> DataIngestionConfig:
         config = self.config.data_ingestion
 
@@ -36,6 +37,7 @@ class ConfigurationManager:
 
         return data_ingestion_config
     
+#------------------------------Data Validation Configurations---------------------------------
     def get_data_validation_config(self) -> DataValidationConfig:
         config = self.config.data_validation
         schema = self.schema.data_validation
