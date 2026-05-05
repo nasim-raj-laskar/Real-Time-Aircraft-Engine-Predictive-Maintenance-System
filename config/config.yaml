@@ -26,9 +26,11 @@ data_transformation:
 data_feature_engineering:
     root_dir: artifacts/data_feature_engineering
     processed_dir: artifacts/data_transformation/processed
-    output_dir: artifacts/data_feature_engineering/gold
+    output_dir: artifacts/data_feature_engineering/
     s3_gold_prefix: gold/
     X_train: X_train.npy
     y_train: y_train.npy
     X_val: X_val.npy
     y_val: y_val.npy
+    X_test: X_test.npy
+    y_test: y_test.npy

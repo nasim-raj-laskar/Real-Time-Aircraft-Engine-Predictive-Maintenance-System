@@ -42,6 +42,9 @@ class DataFeatureEngineeringConfig:
     y_train: str
     X_val: str
     y_val: str
+    X_test: str
+    y_test: str
     window_size: int
     test_size: float
+    rul_clip: int
     random_state: int

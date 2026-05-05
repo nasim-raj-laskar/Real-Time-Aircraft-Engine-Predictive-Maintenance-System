@@ -86,6 +86,7 @@ class ConfigurationManager:
     def get_data_feature_engineering_config(self) -> DataFeatureEngineeringConfig:
         config = self.config.data_feature_engineering
         features = self.features.features
+        transform = self.transform.transformation
 
         create_directories([config.root_dir, config.output_dir])
 
@@ -99,6 +100,9 @@ class ConfigurationManager:
             y_train=config.y_train,
             X_val=config.X_val,
             y_val=config.y_val,
+            X_test=config.X_test,
+            y_test=config.y_test,
+            rul_clip=transform.rul_clip,
             window_size=features.window_size,
             test_size=features.test_size,
             random_state=features.random_state
