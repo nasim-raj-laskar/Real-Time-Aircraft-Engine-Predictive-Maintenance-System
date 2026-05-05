@@ -4,7 +4,7 @@ import sys
 from src.pipeline.data_ingestion_pipeline import DataIngestionPipeline
 from src.pipeline.data_validation_pipeline import DataValidationPipeline
 from src.pipeline.data_transformation_pipeline import DataTransformationPipeline
-
+from src.pipeline.feature_engineering_pipeline import FeatureEngineeringPipeline
 
 
 
@@ -34,6 +34,16 @@ try:
     obj=DataTransformationPipeline()
     obj.initiate_data_transformation()
     logging.info(f">>>>>> Stage {STAGE_NAME} completed <<<<<<\n")
+except Exception as e:
+    logging.error(f"Error in stage {STAGE_NAME}")
+    raise CustomException(e, sys)
+
+STAGE_NAME = "Feature Engineering Stage"
+try:
+    logging.info(">>>>>> Stage Feature Engineering started <<<<<<")
+    obj=FeatureEngineeringPipeline()
+    obj.initiate_feature_engineering()
+    logging.info(">>>>>> Stage Feature Engineering completed <<<<<<\n")
 except Exception as e:
     logging.error(f"Error in stage {STAGE_NAME}")
     raise CustomException(e, sys)

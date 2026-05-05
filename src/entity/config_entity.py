@@ -30,3 +30,18 @@ class DataTransformationConfig:
     drop_columns: List[str]
     keep_sensors: List[str]
     rul_clip: int
+
+@dataclass
+class DataFeatureEngineeringConfig:
+    root_dir: Path
+    processed_dir: Path
+    output_dir: Path
+    s3_bucket: str
+    s3_gold_prefix: str
+    X_train: str
+    y_train: str
+    X_val: str
+    y_val: str
+    window_size: int
+    test_size: float
+    random_state: int

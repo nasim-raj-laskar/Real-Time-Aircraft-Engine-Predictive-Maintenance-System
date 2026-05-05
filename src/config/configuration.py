@@ -81,3 +81,27 @@ class ConfigurationManager:
         )
 
         return data_transformation_config
+    
+#------------------------------Data Feature Engineering Configurations---------------------------------
+    def get_data_feature_engineering_config(self) -> DataFeatureEngineeringConfig:
+        config = self.config.data_feature_engineering
+        features = self.features.features
+
+        create_directories([config.root_dir, config.output_dir])
+
+        data_feature_engineering_config = DataFeatureEngineeringConfig(
+            root_dir=Path(config.root_dir),
+            processed_dir=Path(config.processed_dir),
+            output_dir=Path(config.output_dir),
+            s3_bucket=os.getenv("AWS_S3_BUCKET"),
+            s3_gold_prefix=config.s3_gold_prefix,
+            X_train=config.X_train,
+            y_train=config.y_train,
+            X_val=config.X_val,
+            y_val=config.y_val,
+            window_size=features.window_size,
+            test_size=features.test_size,
+            random_state=features.random_state
+        )
+
+        return data_feature_engineering_config
