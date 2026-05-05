@@ -22,3 +22,13 @@ data_transformation:
   train_output: train_processed.parquet
   test_output: test_processed.parquet
   scaler_path: artifacts/data_transformation/scaler.pkl
+
+data_feature_engineering:
+    root_dir: artifacts/data_feature_engineering
+    processed_dir: artifacts/data_transformation/processed
+    output_dir: artifacts/data_feature_engineering/gold
+    s3_gold_prefix: gold/
+    X_train: X_train.npy
+    y_train: y_train.npy
+    X_val: X_val.npy
+    y_val: y_val.npy
