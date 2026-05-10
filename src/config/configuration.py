@@ -109,3 +109,34 @@ class ConfigurationManager:
         )
 
         return data_feature_engineering_config
+    
+#------------------------------Model Trainer Configurations---------------------------------
+    def get_model_trainer_config(self) -> ModelTrainerConfig:
+        config = self.config.model_trainer
+        model = self.models.gru_model
+        params = self.params.training
+
+        create_directories([config.root_dir])
+
+        model_trainer_config = ModelTrainerConfig(
+            root_dir=Path(config.root_dir),
+            gold_dir=Path(config.gold_dir),
+            model_path=Path(config.model_path),
+            history_path=Path(config.history_path),
+            s3_bucket=os.getenv("AWS_S3_BUCKET"),
+            s3_artifact_prefix=config.s3_artifact_prefix,
+            gru_units=model.gru_units,
+            dense_units=model.dense_units,
+            dropout_rates=model.dropout_rates,
+            l2_regularization=model.l2_regularization,
+            epochs=params.epochs,
+            batch_size=params.batch_size,
+            learning_rate=params.learning_rate,
+            early_stopping_patience=params.early_stopping_patience,
+            reduce_lr_patience=params.reduce_lr_patience,
+            reduce_lr_factor=params.reduce_lr_factor,
+            min_lr=params.min_lr
+        )
+
+        return model_trainer_config
+

@@ -24,13 +24,20 @@ data_transformation:
   scaler_path: artifacts/data_transformation/scaler.pkl
 
 data_feature_engineering:
-    root_dir: artifacts/data_feature_engineering
-    processed_dir: artifacts/data_transformation/processed
-    output_dir: artifacts/data_feature_engineering/
-    s3_gold_prefix: gold/
-    X_train: X_train.npy
-    y_train: y_train.npy
-    X_val: X_val.npy
-    y_val: y_val.npy
-    X_test: X_test.npy
-    y_test: y_test.npy
+  root_dir: artifacts/data_feature_engineering
+  processed_dir: artifacts/data_transformation/processed
+  output_dir: artifacts/data_feature_engineering/
+  s3_gold_prefix: gold/
+  X_train: X_train.npy
+  y_train: y_train.npy
+  X_val: X_val.npy
+  y_val: y_val.npy
+  X_test: X_test.npy
+  y_test: y_test.npy
+
+model_trainer:
+  root_dir: artifacts/model_trainer
+  gold_dir: artifacts/data_feature_engineering
+  model_path: artifacts/model_trainer/model.keras
+  history_path: artifacts/model_trainer/history.json
+  s3_artifact_prefix: artifacts/
