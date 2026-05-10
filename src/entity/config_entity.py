@@ -48,3 +48,23 @@ class DataFeatureEngineeringConfig:
     test_size: float
     rul_clip: int
     random_state: int
+
+@dataclass
+class ModelTrainerConfig:
+    root_dir: Path
+    gold_dir: Path
+    model_path: Path
+    history_path: Path
+    s3_bucket: str
+    s3_artifact_prefix: str
+    gru_units: List[int]
+    dense_units: List[int]
+    dropout_rates: List[float]
+    l2_regularization: float
+    epochs: int
+    batch_size: int
+    learning_rate: float
+    early_stopping_patience: int
+    reduce_lr_patience: int
+    reduce_lr_factor: float
+    min_lr: float
