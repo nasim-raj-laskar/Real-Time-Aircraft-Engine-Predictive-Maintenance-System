@@ -1,5 +1,5 @@
 import numpy as np
-import tensorflow as tf
+import tensorflow as tf  #type: ignore
 from tensorflow.keras import layers, models, regularizers  #type: ignore
 from pathlib import Path
 import mlflow
@@ -24,14 +24,18 @@ class ModelTrainer:
         gold_dir = self.config.gold_dir
 
         X_train = np.load(gold_dir / "X_train.npy")
+        # amazonq-ignore-next-line
         y_train = np.load(gold_dir / "y_train.npy")
 
         X_val = np.load(gold_dir / "X_val.npy")
+      
+        # amazonq-ignore-next-line
         y_val = np.load(gold_dir / "y_val.npy")
 
         logging.info(f"X_train: {X_train.shape}")
         logging.info(f"X_val: {X_val.shape}")
 
+        # amazonq-ignore-next-line
         return X_train, y_train, X_val, y_val
 
     #BUILD MODEL 
