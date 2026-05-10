@@ -3,10 +3,12 @@ import tensorflow as tf
 from tensorflow.keras import layers, models, regularizers  #type: ignore
 from pathlib import Path
 import boto3
+import mlflow
 
 from src.entity.config_entity import ModelTrainerConfig
 from src.logging.logger import logging
 from src.utils.common import save_json, load_json
+from src.utils.mlflow_setup import setup_mlflow
 
 
 class ModelTrainer:
@@ -100,6 +102,8 @@ class ModelTrainer:
     # TRAIN 
     def train(self):
 
+        setup_mlflow()
+
         X_train, y_train, X_val, y_val = self.load_data()
 
         window_size = X_train.shape[1]
@@ -113,36 +117,53 @@ class ModelTrainer:
 
         logging.info("Starting model training...")
 
-        history = model.fit(
-            X_train,
-            y_train,
+        with mlflow.start_run():
 
-            validation_data=(X_val, y_val),
+            mlflow.log_params({
+                "epochs": self.config.epochs,
+                "batch_size": self.config.batch_size,
+                "learning_rate": self.config.learning_rate,
+                "gru_units": self.config.gru_units,
+                "dense_units": self.config.dense_units,
+                "dropout_rates": self.config.dropout_rates,
+                "l2_regularization": self.config.l2_regularization,
+                "window_size": window_size,
+                "n_features": n_features,
+            })
 
-            epochs=self.config.epochs,
-            batch_size=self.config.batch_size,
+            history = model.fit(
+                X_train,
+                y_train,
+                validation_data=(X_val, y_val),
+                epochs=self.config.epochs,
+                batch_size=self.config.batch_size,
+                sample_weight=sample_weights,
+                callbacks=self.get_callbacks(),
+                verbose=1
+            )
 
-            sample_weight=sample_weights,
+            logging.info("Training completed")
 
-            callbacks=self.get_callbacks(),
+            # LOG METRICS
+            final_epoch = len(history.history["loss"]) - 1
+            mlflow.log_metrics({
+                "train_loss": history.history["loss"][final_epoch],
+                "train_rmse": history.history["rmse"][final_epoch],
+                "val_loss": history.history["val_loss"][final_epoch],
+                "val_rmse": history.history["val_rmse"][final_epoch],
+            })
 
-            verbose=1
-        )
+            #  SAVE MODEL 
+            model.save(self.config.model_path)
+            logging.info(f"Model saved at: {self.config.model_path}")
 
-        logging.info("Training completed")
+            #  SAVE HISTORY 
+            save_json(self.config.history_path, history.history)
+            logging.info(f"Training history saved at: {self.config.history_path}")
 
-        #  SAVE MODEL 
-        model.save(self.config.model_path)
-
-        logging.info(f"Model saved at: {self.config.model_path}")
-
-        #  SAVE HISTORY 
-        save_json(
-            self.config.history_path,
-            history.history
-        )
-
-        logging.info(f"Training history saved at: {self.config.history_path}")
+            # LOG HISTORY ARTIFACT
+            mlflow.log_artifact(str(self.config.history_path), artifact_path="artifacts")
+            logging.info("history.json logged to MLflow")
 
         #  UPLOAD ARTIFACTS 
         logging.info("Uploading model artifacts to S3...")
@@ -165,7 +186,5 @@ class ModelTrainer:
     def run(self):
 
         logging.info("========== MODEL TRAINING STARTED ==========")
-
         self.train()
-
         logging.info("========== MODEL TRAINING COMPLETED ==========\n")
