@@ -4,6 +4,9 @@ from tensorflow.keras import layers, models, regularizers  #type: ignore
 from pathlib import Path
 import boto3
 import mlflow
+import matplotlib.pyplot as plt
+import tempfile
+import os
 
 from src.entity.config_entity import ModelTrainerConfig
 from src.logging.logger import logging
@@ -164,6 +167,37 @@ class ModelTrainer:
             # LOG HISTORY ARTIFACT
             mlflow.log_artifact(str(self.config.history_path), artifact_path="artifacts")
             logging.info("history.json logged to MLflow")
+
+            # PLOT AND LOG CURVES
+            with tempfile.TemporaryDirectory() as tmp:
+
+                # Loss curve
+                fig, ax = plt.subplots()
+                ax.plot(history.history["loss"], label="train_loss")
+                ax.plot(history.history["val_loss"], label="val_loss")
+                ax.set_title("Loss Curve")
+                ax.set_xlabel("Epoch")
+                ax.set_ylabel("Loss")
+                ax.legend()
+                loss_path = os.path.join(tmp, "loss_curve.png")
+                fig.savefig(loss_path)
+                plt.close(fig)
+
+                # RMSE curve
+                fig, ax = plt.subplots()
+                ax.plot(history.history["rmse"], label="train_rmse")
+                ax.plot(history.history["val_rmse"], label="val_rmse")
+                ax.set_title("RMSE Curve")
+                ax.set_xlabel("Epoch")
+                ax.set_ylabel("RMSE")
+                ax.legend()
+                rmse_path = os.path.join(tmp, "rmse_curve.png")
+                fig.savefig(rmse_path)
+                plt.close(fig)
+
+                mlflow.log_artifact(loss_path, artifact_path="plots")
+                mlflow.log_artifact(rmse_path, artifact_path="plots")
+                logging.info("Loss and RMSE curves logged to MLflow")
 
         #  UPLOAD ARTIFACTS 
         logging.info("Uploading model artifacts to S3...")
