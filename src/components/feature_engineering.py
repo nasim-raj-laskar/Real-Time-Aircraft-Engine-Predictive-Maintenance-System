@@ -1,16 +1,16 @@
 import numpy as np
 import pandas as pd
-import boto3
 from pathlib import Path
 from sklearn.model_selection import GroupShuffleSplit
 from src.entity.config_entity import DataFeatureEngineeringConfig
 from src.logging.logger import logging
 from src.constants import *
+from src.cloud.s3 import S3Client
 
 class FeatureEngineering:
     def __init__(self, config: DataFeatureEngineeringConfig):
         self.config = config
-        self.s3 = boto3.client("s3")
+        self.s3 = S3Client()
 
     def load_data(self):
         logging.info("Loading Silver layer data...")
@@ -95,14 +95,14 @@ class FeatureEngineering:
         logging.info(f"Shapes → X_train: {X_train.shape}, X_val: {X_val.shape}, X_test: {X_test.shape}")
 
         # ---------------- SAVE ----------------
+        logging.info("Saving Gold layer tensors locally...")
         np.save(self.config.output_dir / self.config.X_train, X_train)
         np.save(self.config.output_dir / self.config.y_train, y_train)
-
         np.save(self.config.output_dir / self.config.X_val, X_val)
         np.save(self.config.output_dir / self.config.y_val, y_val)
-
         np.save(self.config.output_dir / self.config.X_test, X_test)
         np.save(self.config.output_dir / self.config.y_test, y_test)
+        logging.info("Gold layer tensors saved")
 
         # ---------------- SAVE METADATA ----------------
         from src.utils.common import save_json
@@ -121,11 +121,10 @@ class FeatureEngineering:
             self.config.X_val, self.config.y_val,
             self.config.X_test, self.config.y_test
         ]:
-            self.s3.upload_file(
-                str(self.config.output_dir / file),
+            self.s3.upload(
+                self.config.output_dir / file,
                 self.config.s3_bucket,
                 f"{self.config.s3_gold_prefix}{file}"
             )
-            logging.info(f"Uploaded {file}")
 
         logging.info("========== FEATURE ENGINEERING COMPLETED ==========\n")

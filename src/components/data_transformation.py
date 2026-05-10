@@ -1,18 +1,18 @@
 import pandas as pd
 import numpy as np
-import boto3
 from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler
 from src.entity.config_entity import DataTransformationConfig
 from src.logging.logger import logging
 import joblib
 from src.constants import *
+from src.cloud.s3 import S3Client
 
 
 class DataTransformation:
     def __init__(self, config: DataTransformationConfig):
         self.config = config
-        self.s3 = boto3.client("s3")
+        self.s3 = S3Client()
 
     def load_data(self):
         logging.info("Loading raw data...")
@@ -74,11 +74,11 @@ class DataTransformation:
 
         logging.info("Uploading to S3 (Silver layer)...")
 
-        self.s3.upload_file(str(train_path), self.config.s3_bucket,
-                           f"{self.config.s3_silver_prefix}{self.config.train_output}")
+        self.s3.upload(train_path, self.config.s3_bucket,
+                       f"{self.config.s3_silver_prefix}{self.config.train_output}")
 
-        self.s3.upload_file(str(test_path), self.config.s3_bucket,
-                           f"{self.config.s3_silver_prefix}{self.config.test_output}")
+        self.s3.upload(test_path, self.config.s3_bucket,
+                       f"{self.config.s3_silver_prefix}{self.config.test_output}")
 
         logging.info("Upload completed.")
 
