@@ -1,5 +1,4 @@
 import json
-import boto3
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -9,12 +8,13 @@ from src.entity.config_entity import ModelEvaluationConfig
 from src.logging.logger import logging
 from src.utils.common import save_json
 from src.metrics.plot import save_confusion_matrix, save_prediction_plot, save_error_distribution
+from src.cloud.s3 import S3Client
 
 
 class ModelEvaluation:
     def __init__(self, config: ModelEvaluationConfig):
         self.config = config
-        self.s3 = boto3.client("s3")
+        self.s3 = S3Client()
 
     #NASA SCORE 
     def nasa_score(self, y_true, y_pred):
@@ -139,30 +139,15 @@ class ModelEvaluation:
         logging.info("Uploading evaluation artifacts to S3...")
 
         files = [
-
             self.config.metrics_path,
-
             self.config.results_path,
-
             self.config.confusion_matrix_path,
-
             self.config.prediction_plot_path,
-
             self.config.error_distribution_path
         ]
 
         for file in files:
-
-            self.s3.upload_file(
-
-                str(file),
-
-                self.config.s3_bucket,
-
-                f"{self.config.s3_artifact_prefix}{file.name}"
-            )
-
-            logging.info(f"Uploaded: {file.name}")
+            self.s3.upload(file, self.config.s3_bucket, f"{self.config.s3_artifact_prefix}{file.name}")
 
     #  RUN 
     def run(self):
