@@ -20,33 +20,20 @@ class ModelTrainer:
     #LOAD DATA
     def load_data(self):
         logging.info("Loading Gold layer tensors...")
-
         gold_dir = self.config.gold_dir
-
         X_train = np.load(gold_dir / "X_train.npy")
-        # amazonq-ignore-next-line
         y_train = np.load(gold_dir / "y_train.npy")
-
         X_val = np.load(gold_dir / "X_val.npy")
-      
-        # amazonq-ignore-next-line
         y_val = np.load(gold_dir / "y_val.npy")
-
         logging.info(f"X_train: {X_train.shape}")
         logging.info(f"X_val: {X_val.shape}")
-
-        # amazonq-ignore-next-line
         return X_train, y_train, X_val, y_val
 
     #BUILD MODEL 
     def build_model(self, window_size, n_features):
-
         logging.info("Building GRU model...")
-
         inp = tf.keras.Input(shape=(window_size, n_features))
-
         x = inp
-
         for i, units in enumerate(self.config.gru_units):
 
             return_sequences = i < len(self.config.gru_units) - 1
