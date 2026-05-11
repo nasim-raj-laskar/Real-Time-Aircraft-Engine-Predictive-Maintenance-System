@@ -68,3 +68,16 @@ class ModelTrainerConfig:
     reduce_lr_patience: int
     reduce_lr_factor: float
     min_lr: float
+
+@dataclass
+class ModelEvaluationConfig:
+    root_dir: Path
+    model_path: Path
+    gold_dir: Path
+    metrics_path: Path
+    results_path: Path
+    confusion_matrix_path: Path
+    prediction_plot_path: Path
+    error_distribution_path: Path
+    s3_bucket: str
+    s3_artifact_prefix: str

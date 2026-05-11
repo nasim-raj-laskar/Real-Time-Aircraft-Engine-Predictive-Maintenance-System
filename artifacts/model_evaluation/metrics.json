@@ -1,0 +1,31 @@
+{
+    "rmse": 54.87199014738189,
+    "nasa_score": 64758.40625,
+    "classification_report": {
+        "False": {
+            "precision": 1.0,
+            "recall": 0.82,
+            "f1-score": 0.9010989010989011,
+            "support": 100.0
+        },
+        "True": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1-score": 0.0,
+            "support": 0.0
+        },
+        "accuracy": 0.82,
+        "macro avg": {
+            "precision": 0.5,
+            "recall": 0.41,
+            "f1-score": 0.45054945054945056,
+            "support": 100.0
+        },
+        "weighted avg": {
+            "precision": 1.0,
+            "recall": 0.82,
+            "f1-score": 0.9010989010989011,
+            "support": 100.0
+        }
+    }
+}
