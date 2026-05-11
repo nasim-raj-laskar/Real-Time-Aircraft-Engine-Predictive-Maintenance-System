@@ -3,11 +3,11 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from pathlib import Path
-from sklearn.metrics import mean_squared_error, classification_report
 from src.entity.config_entity import ModelEvaluationConfig
 from src.logging.logger import logging
 from src.utils.common import save_json
 from src.metrics.plot import save_confusion_matrix, save_prediction_plot, save_error_distribution
+from src.metrics.scores import compute_rmse, compute_nasa_score, compute_classification_report
 from src.cloud.s3 import S3Client
 
 
@@ -16,35 +16,15 @@ class ModelEvaluation:
         self.config = config
         self.s3 = S3Client()
 
-    #NASA SCORE 
-    def nasa_score(self, y_true, y_pred):
-
-        d = y_pred.flatten() - y_true.flatten()
-
-        return float(
-            np.sum(
-                np.where(
-                    d < 0,
-                    np.exp(-d / 13) - 1,
-                    np.exp(d / 10) - 1
-                )
-            )
-        )
-
     #LOAD
     def load_artifacts(self):
         logging.info("Loading evaluation artifacts...")
-
         model = tf.keras.models.load_model(self.config.model_path)
-
         X_test = np.load(self.config.gold_dir / "X_test.npy")
-
         y_test = np.load(self.config.gold_dir / "y_test.npy")
-
         with open(self.config.gold_dir / "feature_config.json") as f:
             feature_config = json.load(f)
         rul_clip = feature_config["rul_clip"]
-
         logging.info(f"X_test shape: {X_test.shape}")
 
         return model, X_test, y_test, rul_clip
@@ -59,16 +39,11 @@ class ModelEvaluation:
 
         preds = np.clip(preds,0,rul_clip)
 
-        y_true = np.clip(
-            y_test * rul_clip,
-            0,
-            rul_clip
-        )
+        y_true = np.clip(y_test * rul_clip,0,rul_clip)
 
         #  METRICS 
-        rmse = np.sqrt(mean_squared_error(y_true, preds))
-
-        nasa = self.nasa_score(y_true,preds)
+        rmse = compute_rmse(y_true, preds)
+        nasa = compute_nasa_score(y_true, preds)
 
         logging.info(f"RMSE: {rmse:.2f}")
         logging.info(f"NASA Score: {nasa:.2f}")
@@ -104,12 +79,7 @@ class ModelEvaluation:
             results["pred_rul"] < 30
         )
 
-        cls_report = classification_report(
-            results["critical_true"],
-            results["critical_pred"],
-            output_dict=True,
-            zero_division=0
-        )
+        cls_report = compute_classification_report(results["critical_true"], results["critical_pred"])
 
         #  SAVE METRICS 
         metrics = {
@@ -151,13 +121,6 @@ class ModelEvaluation:
 
     #  RUN 
     def run(self):
-
-        logging.info(
-            "========== MODEL EVALUATION STARTED =========="
-        )
-
+        logging.info( "========== MODEL EVALUATION STARTED ==========")
         self.evaluate()
-
-        logging.info(
-            "========== MODEL EVALUATION COMPLETED ==========\n"
-        )
+        logging.info("========== MODEL EVALUATION COMPLETED ==========\n")
