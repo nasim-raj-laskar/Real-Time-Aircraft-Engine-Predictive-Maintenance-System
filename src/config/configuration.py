@@ -140,3 +140,23 @@ class ConfigurationManager:
 
         return model_trainer_config
 
+#------------------------------Model Evaluation Configurations---------------------------------
+    def get_model_evaluation_config(self) -> ModelEvaluationConfig:
+        config = self.config.model_evaluation
+
+        create_directories([config.root_dir])
+
+        model_evaluation_config = ModelEvaluationConfig(
+            root_dir=Path(config.root_dir),
+            model_path=Path(config.model_path),
+            gold_dir=Path(config.gold_dir),
+            metrics_path=Path(config.metrics_path),
+            results_path=Path(config.results_path),
+            confusion_matrix_path=Path(config.confusion_matrix_path),
+            prediction_plot_path=Path(config.prediction_plot_path),
+            error_distribution_path=Path(config.error_distribution_path),
+            s3_bucket=os.getenv("AWS_S3_BUCKET"),
+            s3_artifact_prefix=config.s3_artifact_prefix
+        )
+
+        return model_evaluation_config
