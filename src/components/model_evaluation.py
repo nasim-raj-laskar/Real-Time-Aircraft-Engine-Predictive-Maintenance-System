@@ -107,7 +107,8 @@ class ModelEvaluation:
         cls_report = classification_report(
             results["critical_true"],
             results["critical_pred"],
-            output_dict=True
+            output_dict=True,
+            zero_division=0
         )
 
         #  SAVE METRICS 
