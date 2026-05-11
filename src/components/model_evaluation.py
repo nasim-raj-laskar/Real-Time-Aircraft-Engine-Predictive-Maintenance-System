@@ -3,12 +3,12 @@ import boto3
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-import matplotlib.pyplot as plt
 from pathlib import Path
-from sklearn.metrics import (mean_squared_error,confusion_matrix,classification_report)
+from sklearn.metrics import mean_squared_error, classification_report
 from src.entity.config_entity import ModelEvaluationConfig
 from src.logging.logger import logging
 from src.utils.common import save_json
+from src.metrics.plot import save_confusion_matrix, save_prediction_plot, save_error_distribution
 
 
 class ModelEvaluation:
@@ -130,89 +130,10 @@ class ModelEvaluation:
             f"Metrics saved at: {self.config.metrics_path}"
         )
 
-        #  CONFUSION MATRIX 
-        cm = confusion_matrix(
-            results["critical_true"],
-            results["critical_pred"]
-        )
-
-        plt.figure(figsize=(5, 4))
-
-        plt.imshow(cm)
-
-        plt.title("Confusion Matrix")
-
-        plt.colorbar()
-
-        plt.xlabel("Predicted")
-        plt.ylabel("Actual")
-
-        for i in range(cm.shape[0]):
-            for j in range(cm.shape[1]):
-
-                plt.text(
-                    j,
-                    i,
-                    cm[i, j],
-                    ha="center",
-                    va="center"
-                )
-
-        plt.savefig(
-            self.config.confusion_matrix_path
-        )
-
-        plt.close()
-
-        logging.info("Confusion matrix saved")
-
-        #  PRED VS TRUE 
-        plt.figure(figsize=(6, 6))
-
-        plt.scatter(
-            y_true,
-            preds,
-            alpha=0.6
-        )
-
-        plt.plot(
-            [0, rul_clip],
-            [0, rul_clip]
-        )
-
-        plt.xlabel("True RUL")
-        plt.ylabel("Predicted RUL")
-
-        plt.title("Predicted vs True")
-
-        plt.savefig(
-            self.config.prediction_plot_path
-        )
-
-        plt.close()
-
-        logging.info("Prediction plot saved")
-
-        #  ERROR DISTRIBUTION 
-        plt.figure(figsize=(6, 4))
-
-        plt.hist(
-            results["error"],
-            bins=30
-        )
-
-        plt.xlabel("Prediction Error")
-        plt.ylabel("Count")
-
-        plt.title("Error Distribution")
-
-        plt.savefig(
-            self.config.error_distribution_path
-        )
-
-        plt.close()
-
-        logging.info("Error distribution saved")
+        #  PLOTS 
+        save_confusion_matrix(results["critical_true"], results["critical_pred"], self.config.confusion_matrix_path)
+        save_prediction_plot(y_true, preds, rul_clip, self.config.prediction_plot_path)
+        save_error_distribution(results["error"], self.config.error_distribution_path)
 
         #  UPLOAD TO S3 
         logging.info("Uploading evaluation artifacts to S3...")
