@@ -1,7 +1,9 @@
 import json
+import mlflow
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from mlflow.models.signature import infer_signature
 from pathlib import Path
 from src.entity.config_entity import ModelEvaluationConfig
 from src.logging.logger import logging
@@ -9,6 +11,7 @@ from src.utils.common import save_json
 from src.metrics.plot import save_confusion_matrix, save_prediction_plot, save_error_distribution
 from src.metrics.scores import compute_rmse, compute_nasa_score, compute_classification_report
 from src.cloud.s3 import S3Client
+from src.utils.mlflow_setup import setup_mlflow
 
 
 class ModelEvaluation:
@@ -48,6 +51,8 @@ class ModelEvaluation:
         logging.info(f"RMSE: {rmse:.2f}")
         logging.info(f"NASA Score: {nasa:.2f}")
 
+        mlflow.log_metrics({"rmse": rmse, "nasa_score": nasa})
+
         #  RESULTS DF 
         results = pd.DataFrame({
 
@@ -81,6 +86,12 @@ class ModelEvaluation:
 
         cls_report = compute_classification_report(results["critical_true"], results["critical_pred"])
 
+        mlflow.log_metrics({
+            "precision_critical": cls_report.get("True", {}).get("precision", 0),
+            "recall_critical":    cls_report.get("True", {}).get("recall", 0),
+            "f1_critical":        cls_report.get("True", {}).get("f1-score", 0),
+        })
+
         #  SAVE METRICS 
         metrics = {
 
@@ -105,6 +116,16 @@ class ModelEvaluation:
         save_prediction_plot(y_true, preds, rul_clip, self.config.prediction_plot_path)
         save_error_distribution(results["error"], self.config.error_distribution_path)
 
+        mlflow.log_artifact(str(self.config.confusion_matrix_path), artifact_path="evaluation/plots")
+        mlflow.log_artifact(str(self.config.prediction_plot_path), artifact_path="evaluation/plots")
+        mlflow.log_artifact(str(self.config.error_distribution_path), artifact_path="evaluation/plots")
+        mlflow.log_artifact(str(self.config.metrics_path), artifact_path="evaluation")
+        mlflow.log_artifact(str(self.config.results_path), artifact_path="evaluation")
+        signature = infer_signature(X_test, preds)
+        mlflow.tensorflow.log_model(model, name="model", signature=signature)
+
+        logging.info("Artifacts and model logged to MLflow")
+
         #  UPLOAD TO S3 
         logging.info("Uploading evaluation artifacts to S3...")
 
@@ -121,6 +142,8 @@ class ModelEvaluation:
 
     #  RUN 
     def run(self):
-        logging.info( "========== MODEL EVALUATION STARTED ==========")
-        self.evaluate()
+        logging.info("========== MODEL EVALUATION STARTED ==========")
+        setup_mlflow()
+        with mlflow.start_run(run_name="model-evaluation"):
+            self.evaluate()
         logging.info("========== MODEL EVALUATION COMPLETED ==========\n")
