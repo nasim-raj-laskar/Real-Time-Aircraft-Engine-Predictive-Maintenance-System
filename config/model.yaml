@@ -1,3 +1,4 @@
+#MODEL SPECS
 gru_model:
   gru_units:
     - 128

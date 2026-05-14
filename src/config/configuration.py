@@ -15,7 +15,8 @@ class ConfigurationManager:
         schema_filepath=SCHEMA,
         models_filepath=MODELS,
         transform_filepath=TRANSFORM,
-        features_filepath=FEATURES
+        features_filepath=FEATURES,
+        registor_filepath=REGISTOR
 ):
 
         self.config = read_yaml(config_filepath)
@@ -24,6 +25,7 @@ class ConfigurationManager:
         self.models = read_yaml(models_filepath)
         self.transform = read_yaml(transform_filepath)
         self.features = read_yaml(features_filepath)
+        self.registor = read_yaml(registor_filepath)
 
         create_directories([self.config.artifacts_root])
 
@@ -160,3 +162,25 @@ class ConfigurationManager:
         )
 
         return model_evaluation_config
+    
+#------------------------------Model Registration Configurations---------------------------------
+    def get_model_registry_config(self) -> ModelRegistryConfig:
+        config = self.config.model_registry
+        registry = self.registor
+
+        create_directories([config.root_dir])
+
+        model_registry_config = ModelRegistryConfig(
+            root_dir=Path(config.root_dir),
+            model_path=Path(config.model_path),
+            gold_dir=Path(config.gold_dir),
+            metrics_path=Path(config.metrics_path),
+            registered_model_name=registry.registered_model_name,
+            rmse_threshold=registry.promotion_thresholds.rmse,
+            nasa_threshold=registry.promotion_thresholds.nasa_score,
+            stage=registry.stage,
+            s3_bucket=os.getenv("AWS_S3_BUCKET"),
+            s3_artifact_prefix=config.s3_artifact_prefix
+        )
+
+        return model_registry_config

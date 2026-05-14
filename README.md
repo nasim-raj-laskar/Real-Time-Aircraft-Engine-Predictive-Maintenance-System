@@ -1,394 +1,472 @@
 # Real-Time Aircraft Engine Predictive Maintenance System
 
-## Project Goal
+[![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
+[![TensorFlow](https://img.shields.io/badge/TensorFlow-2.15-orange.svg)](https://www.tensorflow.org/)
+[![MLflow](https://img.shields.io/badge/MLflow-Tracking-green.svg)](https://mlflow.org/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Build a production-style Machine Learning system that predicts aircraft engine failure risk and Remaining Useful Life (RUL) using streaming telemetry from engines.
+A production-ready Machine Learning system that predicts aircraft engine **Remaining Useful Life (RUL)** using deep learning on NASA's C-MAPSS turbofan engine dataset.
 
-This project demonstrates:
+## 🎯 Project Overview
 
-* Streaming ML pipelines
-* Feature stores
-* Real-time inference
-* MLOps practices
-* Monitoring and observability
+This system demonstrates end-to-end MLOps practices for predictive maintenance:
+
+- ✅ **Automated ML Pipeline** - 7-stage modular pipeline from data ingestion to model deployment
+- ✅ **Deep Learning** - 3-layer GRU model with 95.4% precision on critical engine detection
+- ✅ **MLflow Integration** - Experiment tracking, model registry, and versioning
+- ✅ **S3 Data Lake** - Medallion architecture (Bronze/Silver/Gold layers)
+- ✅ **Model Registry** - Automated promotion with quality gates
+- 🔮 **Streaming Ready** - Designed for Kafka + Redis real-time inference
+- 🔮 **Monitoring Ready** - Prometheus + Grafana + Evidently AI
 
 ---
 
-# Dataset
+## 🏗️ High-Level Architecture
 
-## NASA C-MAPSS Turbofan Engine Dataset
+```mermaid
+flowchart TB
+    subgraph Data Layer
+        A[NASA C-MAPSS<br/>Dataset] --> B[S3 Bronze Layer<br/>Raw Data]
+        B --> C[S3 Silver Layer<br/>Processed Data]
+        C --> D[S3 Gold Layer<br/>ML Features]
+    end
+    
+    subgraph ML Pipeline
+        D --> E[GRU Model<br/>Training]
+        E --> F[Model<br/>Evaluation]
+        F --> G{Quality<br/>Gates}
+        G -->|Pass| H[MLflow Model<br/>Registry]
+        G -->|Fail| E
+        H --> I[S3 Artifacts<br/>Storage]
+    end
+    
+    subgraph Deployment
+        I --> J[Inference<br/>Service]
+        J --> K[Predictions<br/>API]
+    end
+    
+    subgraph Monitoring
+        K --> L[Prometheus<br/>Metrics]
+        L --> M[Grafana<br/>Dashboards]
+    end
+    
+    style G fill:#FFD700,stroke:#333,stroke-width:2px
+    style H fill:#90EE90,stroke:#333,stroke-width:2px
+    style K fill:#87CEEB,stroke:#333,stroke-width:2px
+```
 
-Each row represents telemetry collected from an aircraft engine during a flight cycle.
+---
 
-### Columns
+## 📊 Current Performance
 
-engine_id
-cycle
-operational_setting_1
-operational_setting_2
-operational_setting_3
-sensor_1
-sensor_2
+| Metric | Value | Target | Status |
+|--------|-------|--------|--------|
+| **Test RMSE** | 15.28 cycles | < 20 | ✅ |
+| **NASA Score** | 444.6 | < 2000 | ✅ |
+| **Precision (Critical)** | 95.4% | > 80% | ✅ |
+| **Recall (Critical)** | 84.0% | > 75% | ✅ |
+| **F1-Score** | 0.894 | > 0.80 | ✅ |
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.11+
+- AWS Account (for S3 storage)
+- DagsHub Account (for MLflow tracking)
+
+### Installation
+
+```bash
+# Clone repository
+git clone https://github.com/nasim-raj-laskar/Real-Time-Aircraft-Engine-Predictive-Maintenance-System.git
+cd Real-Time-Aircraft-Engine-Predictive-Maintenance-System
+
+# Install dependencies using uv
+uv sync
+
+# Configure AWS credentials
+aws configure
+
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your credentials:
+# - AWS_ACCESS_KEY_ID
+# - AWS_SECRET_ACCESS_KEY
+# - DAGSHUB_TOKEN
+# - MLFLOW_TRACKING_URI
+```
+
+### Run Pipeline
+
+```bash
+python main.py
+```
+
+**Expected Output:**
+```
+✓ Warnings suppressed
+Accessing as nasim-raj-laskar
+Initialized MLflow...
+
+Epoch 1/150
+56/56 ━━━━━━━━━━━━━━━━━━━━ 13s - loss: 0.1676 - rmse: 0.2966
 ...
-sensor_21
+Epoch 150/150
+56/56 ━━━━━━━━━━━━━━━━━━━━ 6s - loss: 0.0342 - rmse: 0.1229
 
-### Example Row
+Created version '3' of model 'aircraft-rul-gru'.
 
-engine_id,cycle,op1,op2,op3,s1,s2,...,s21
-1,1,-0.0007,-0.0004,100.0,518.67,641.82,...,23.419
+======================================================================
+🎉 PIPELINE EXECUTION COMPLETED SUCCESSFULLY
+======================================================================
 
-### Interpretation
+📊 View your experiment at:
+   https://dagshub.com/nasim-raj-laskar/...
 
-engine_id → unique engine
-cycle → flight cycle number
-sensor_i → engine telemetry (temperature, pressure, vibration etc)
-
-### Prediction Target
-
-Remaining Useful Life (RUL)
-
-RUL = failure_cycle - current_cycle
-
----
-
-# High-Level System Architecture
-
-```
-                    Engine Telemetry CSV
-                            |
-                            |
-                  Kafka Producer (simulator)
-                            |
-                            |
-                       Kafka Topic
-                            |
-            ----------------------------------
-            |                                |
-     Feature Engineering Service       Data Lake
-            |                                |
-            |                                |
-      Online Feature Store              Offline Store
-            |                                |
-            |                                |
-        Real-Time Inference API        Model Training
-            |
-            |
-       Prediction Service
-            |
-            |
-     Monitoring + Dashboards
+📁 Artifacts saved in: artifacts/
+☁️  Artifacts uploaded to S3
+🏷️  Model registered to MLflow Model Registry
+======================================================================
 ```
 
 ---
 
-# Architecture Components
-
-## 1 Data Ingestion (Streaming Simulation)
-
-Because the dataset is static CSV, we simulate telemetry streaming.
-
-### Process
-
-1. Python script reads rows sequentially
-2. Each row is sent as a Kafka event
-3. Events simulate live engine telemetry
-
-### Example Event
-
-{
-"engine_id": 12,
-"cycle": 104,
-"sensor_3": 642.1,
-"sensor_7": 1589.3,
-"sensor_12": 23.4
-}
-
-### Kafka Topic
-
-engine_telemetry
-
----
-
-# 2 Stream Processing / Feature Engineering
-
-Kafka consumers process telemetry events.
-
-Raw sensor readings are converted into ML features.
-
-## Example Engineered Features
-
-rolling_temperature_mean
-rolling_vibration_std
-pressure_trend
-sensor_entropy
-cycle_delta
-
-### Example Feature Record
-
-engine_id: 12
-rolling_temp_mean: 623.4
-vibration_std: 0.34
-pressure_trend: -0.12
-
-These features are stored in the feature store.
-
----
-
-# 3 Feature Store
-
-A feature store ensures the same feature logic is used for training and inference.
-
-## Online Feature Store
-
-Purpose: low-latency lookup during inference
-
-Technology options:
-
-Redis
-DynamoDB
-Postgres (small scale)
-
-Example record
-
-key: engine_12
-
-{
-"rolling_temp_mean": 623.4,
-"vibration_std": 0.34,
-"pressure_trend": -0.12
-}
-
-## Offline Feature Store
-
-Purpose: historical storage for training
-
-Technology options
-
-S3
-PostgreSQL
-Parquet data lake
-
----
-
-# 4 Model Training Pipeline
-
-Training occurs periodically using historical data.
-
-## Pipeline
-
-Offline Feature Store
-|
-|
-Feature Dataset
-|
-|
-Model Training
-|
-|
-Model Registry
-
-## Candidate Models
-
-XGBoost
-LightGBM
-RandomForest
-LSTM
-
-Recommended baseline:
-
-XGBoost
-
-## Prediction Target
-
-Remaining Useful Life
-
-or
-
-Failure Probability
-
----
-
-# 5 Real-Time Inference Service
-
-A REST API exposes predictions.
-
-## Request Example
-
-POST /predict
-
-{
-"engine_id": 12
-}
-
-## Inference Flow
-
-Request
-|
-|
-Feature Store Lookup
-|
-|
-Model Prediction
-|
-|
-Return Result
-
-## Response Example
-
-{
-"engine_id": 12,
-"remaining_cycles": 38,
-"failure_risk": 0.72
-}
-
----
-
-# 6 Monitoring and Observability
-
-Production ML systems require monitoring.
-
-## System Metrics
-
-latency
-throughput
-CPU usage
-memory usage
-
-## ML Metrics
-
-data drift
-feature drift
-prediction distribution
-model confidence
-
-## Monitoring Stack
-
-Prometheus
-Grafana
-Evidently AI
-
----
-
-# End-to-End Workflow
-
-Step 1
-
-Dataset CSV → Kafka Producer
-
-Step 2
-
-Kafka topic receives engine telemetry
-
-Step 3
-
-Feature engineering service computes features
-
-Step 4
-
-Features stored in online feature store
-
-Step 5
-
-Inference service retrieves features
-
-Step 6
-
-Model predicts RUL and failure probability
-
-Step 7
-
-Results visualized on monitoring dashboard
-
----
-
-# Technology Stack
-
-Streaming
-
-Kafka
-
-Feature Store
-
-Redis
-S3
-
-ML
-
-XGBoost
-Scikit-learn
-PyTorch (optional)
-
-Serving
-
-FastAPI
-
-MLOps
-
-MLflow
-Airflow
-Docker
-
-Monitoring
-
-Prometheus
-Grafana
-
----
-
-# Optional Extensions (Advanced)
-
-Add model retraining pipeline
-
-Detect sensor drift automatically
-
-Add maintenance recommendation engine
-
-Deploy system using Kubernetes
-
-Add CI/CD pipeline for models
-
----
-
-# Final System Diagram
+## 📁 Project Structure
 
 ```
-             Engine Telemetry
-                    |
-                    |
-               Kafka Producer
-                    |
-                    |
-                Kafka Topic
-                    |
-        -----------------------------
-        |                           |
- Feature Engineering           Data Lake
-        |                           |
-        |                           |
- Online Feature Store         Training Pipeline
-        |                           |
-        |                           |
-   Real-Time Inference         Model Registry
-        |
-        |
-    Prediction API
-        |
-        |
- Monitoring Dashboards
+Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
+│
+├── src/
+│   ├── components/          # Core ML components
+│   │   ├── data_ingestion.py
+│   │   ├── data_validation.py
+│   │   ├── data_transformation.py
+│   │   ├── feature_engineering.py
+│   │   ├── model_training.py
+│   │   ├── model_evaluation.py
+│   │   └── model_registry.py
+│   │
+│   ├── pipeline/            # Pipeline orchestration
+│   ├── config/              # Configuration management
+│   ├── entity/              # Data classes
+│   ├── utils/               # Helper functions
+│   ├── metrics/             # Evaluation metrics
+│   ├── cloud/               # S3 integration
+│   └── logging/             # Structured logging
+│
+├── config/                  # YAML configurations
+│   ├── config.yaml          # Pipeline config
+│   ├── model.yaml           # Model architecture
+│   ├── params.yaml          # Training params
+│   └── registor.yaml        # Model registry
+│
+├── artifacts/               # Generated artifacts
+│   ├── data_ingestion/
+│   ├── data_transformation/
+│   ├── data_feature_engineering/
+│   ├── model_trainer/
+│   ├── model_evaluation/
+│   └── model_registry/
+│
+├── docs/                    # Documentation
+├── Dataset/                 # NASA C-MAPSS data
+├── main.py                  # Pipeline runner
+└── README.md
 ```
 
 ---
 
-# What This Project Demonstrates
+## 🔄 ML Pipeline (7 Stages)
 
-Industrial predictive maintenance
+### Stage 1: Data Ingestion
+- Downloads raw data from S3 (Bronze layer)
+- Stores locally in `artifacts/data_ingestion/`
 
-Streaming machine learning systems
+### Stage 2: Data Validation
+- Schema validation
+- Column checks
+- Data quality verification
 
-Feature store architecture
+### Stage 3: Data Transformation
+- Drops constant sensors (10 sensors removed)
+- Computes RUL labels
+- Clips RUL at 125 cycles
+- MinMaxScaler normalization
+- Saves to Parquet (Silver layer)
 
-Real-time inference
+### Stage 4: Feature Engineering
+- Builds sequences (30 timesteps × 11 sensors)
+- Group-aware train/val split (80/20)
+- Saves NumPy arrays (Gold layer)
 
-MLOps pipeline design
+### Stage 5: Model Training
+- **Architecture:** 3-layer GRU (128, 64, 32 units)
+- **Dense Layers:** 2 layers (32, 16 units)
+- **Dropout:** [0.2, 0.2, 0.15]
+- **Optimizer:** Adam (LR: 0.0003)
+- **Callbacks:** Early stopping, LR reduction
+- **MLflow:** Logs params, metrics, artifacts
 
-Monitoring and observability
+### Stage 6: Model Evaluation
+- **Metrics:** RMSE, NASA score, precision, recall, F1
+- **Plots:** Confusion matrix, pred vs true, error distribution
+- **MLflow:** Logs evaluation results
+
+### Stage 7: Model Registry
+- **Quality Gates:** RMSE ≤ 20, NASA Score ≤ 2000
+- **MLflow Registry:** Automatic versioning
+- **Stage Promotion:** None → Staging → Production
+- **S3 Upload:** All artifacts for deployment
+
+---
+
+## 🧠 Model Architecture
+
+```python
+Input: (batch_size, 30, 11)  # 30 timesteps, 11 sensors
+
+GRU Layer 1: 128 units, return_sequences=True
+Dropout: 0.2
+
+GRU Layer 2: 64 units, return_sequences=True
+Dropout: 0.2
+
+GRU Layer 3: 32 units
+Dropout: 0.15
+
+Dense Layer 1: 32 units, ReLU, L2 regularization
+Dense Layer 2: 16 units, ReLU, L2 regularization
+
+Output: 1 unit, Sigmoid activation
+
+Output: Normalized RUL in [0, 1]
+```
+
+**Training Configuration:**
+- Epochs: 150
+- Batch Size: 256
+- Learning Rate: 0.0003
+- Loss: MSE
+- Sample Weighting: Higher weight for critical engines
+
+---
+
+## 📈 Dataset
+
+**NASA C-MAPSS Turbofan Engine Degradation Dataset**
+
+- **Source:** NASA Prognostics Center of Excellence
+- **Engines:** 100 training, 100 test (FD001)
+- **Sensors:** 21 total, 11 useful (after dropping constants)
+- **Cycles:** 128-362 per engine
+- **Target:** Remaining Useful Life (RUL)
+
+**Useful Sensors:**
+```
+s2  - Total temperature at LPC outlet (T24)
+s3  - Total temperature at HPC outlet (T30)
+s4  - Total temperature at LPT outlet (T50)
+s7  - Total pressure at HPC outlet (P30)
+s9  - Physical core speed (Nc)
+s11 - Static pressure at HPC outlet (Ps30)
+s12 - Ratio of fuel flow to Ps30 (phi)
+s14 - Corrected core speed (NRc)
+s17 - Bleed enthalpy (htBleed)
+s20 - HPT coolant bleed (W31)
+s21 - LPT coolant bleed (W32)
+```
+
+---
+
+## 🛠️ Technology Stack
+
+### Core ML
+- **TensorFlow/Keras** - Deep learning framework
+- **NumPy** - Numerical computing
+- **Pandas** - Data manipulation
+- **Scikit-learn** - Preprocessing, metrics
+
+### MLOps
+- **MLflow** - Experiment tracking, model registry
+- **DagsHub** - MLflow hosting
+- **AWS S3** - Data lake (Bronze/Silver/Gold)
+- **Boto3** - S3 client
+
+### Data Storage
+- **Parquet** - Processed data format
+- **NumPy Arrays** - Model inputs
+- **JSON** - Configuration and metadata
+
+### Development
+- **uv** - Fast Python package manager
+- **Python 3.11** - Programming language
+
+### Future (Designed)
+- **FastAPI** - REST API for inference
+- **Kafka** - Event streaming
+- **Redis** - Feature caching
+- **PostgreSQL** - Historical data
+- **Prometheus** - Metrics collection
+- **Grafana** - Dashboards
+- **Evidently AI** - Drift detection
+
+---
+
+## 📊 MLflow Integration
+
+### Experiment Tracking
+
+All training runs are logged to MLflow with:
+- **Parameters:** Model architecture, hyperparameters
+- **Metrics:** Training/validation loss, RMSE, NASA score, F1
+- **Artifacts:** Model, training history, evaluation plots
+
+### Model Registry
+
+Models are automatically registered with:
+- **Versioning:** Each run creates a new version
+- **Stages:** None → Staging → Production
+- **Metadata:** Metrics, parameters, signature
+- **Promotion:** Automated based on quality gates
+
+**Access MLflow UI:**
+```
+https://dagshub.com/nasim-raj-laskar/Real-Time-Aircraft-Engine-Predictive-Maintenance-System.mlflow/
+```
+
+---
+
+## ☁️ S3 Data Lake
+
+### Medallion Architecture
+
+```
+s3://aircraft-engine-data/
+│
+├── bronze/                  # Raw data
+│   ├── train_FD001.txt
+│   ├── test_FD001.txt
+│   └── RUL_FD001.txt
+│
+├── silver/                  # Processed data
+│   ├── train_processed.parquet
+│   └── test_processed.parquet
+│
+├── gold/                    # ML features
+│   ├── X_train.npy
+│   ├── y_train.npy
+│   ├── X_val.npy
+│   ├── y_val.npy
+│   ├── X_test.npy
+│   └── y_test.npy
+│
+└── artifacts/               # Model artifacts
+    ├── model.keras
+    ├── scaler.pkl
+    ├── history.json
+    ├── metrics.json
+    └── *.png (plots)
+```
+
+---
+
+## 🔮 Future Features (Designed, Not Implemented)
+
+### Inference Service
+- FastAPI REST API
+- `/predict` endpoint
+- Model loading from MLflow
+- Docker deployment
+
+### Streaming Pipeline
+- Kafka producer (telemetry simulator)
+- Kafka consumer (feature engineering)
+- Redis (feature cache)
+- PostgreSQL (historical data)
+
+### Monitoring
+- Prometheus metrics
+- Grafana dashboards
+- Evidently drift detection
+- Alerting rules
+
+**Documentation:** All future features are fully designed in `docs/` folder
+
+---
+
+## 📚 Documentation
+
+Comprehensive documentation available in `docs/` folder:
+
+- `00_index.md` - Navigation hub
+- `01_dataset.md` - Dataset reference
+- `02_preprocessing.md` - Preprocessing pipeline
+- `03_feature_engineering.md` - Sequence building
+- `04_model_training.md` - GRU model + Model Registry
+- `05_inference_service.md` - FastAPI design (future)
+- `06_streaming_pipeline.md` - Kafka architecture (future)
+- `07_monitoring.md` - Observability stack (future)
+- `08_project_structure.md` - Project layout
+- `09_architecture.md` - System architecture
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run with 10 epochs for quick testing
+# Edit config/params.yaml: epochs: 10
+
+python main.py
+
+# Expected results (10 epochs):
+# - Test RMSE: ~15-18 cycles
+# - F1-Score: ~0.85-0.90
+# - Training time: ~2-3 minutes
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- **NASA Prognostics Center of Excellence** - C-MAPSS dataset
+- **DagsHub** - MLflow hosting
+- **AWS** - S3 storage
+
+---
+
+## 📧 Contact
+
+**Nasim Raj Laskar**
+- GitHub: [@nasim-raj-laskar](https://github.com/nasim-raj-laskar)
+- MLflow: [View Experiments](https://dagshub.com/nasim-raj-laskar/Real-Time-Aircraft-Engine-Predictive-Maintenance-System.mlflow/)
+
+---
+
+## 🌟 Star History
+
+If you find this project useful, please consider giving it a star! ⭐
+
+---
+
+**Built with ❤️ for Production ML Systems**

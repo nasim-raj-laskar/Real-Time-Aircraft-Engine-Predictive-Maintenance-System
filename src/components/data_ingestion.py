@@ -10,6 +10,7 @@ class DataIngestion:
         self.config = config
         self.s3 = S3Client()
 
+    #download data from s3 to local
     def download_file(self, key: str, local_path: Path):
         if local_path.exists():
             logging.info(f"Skipping existing file: {local_path}")

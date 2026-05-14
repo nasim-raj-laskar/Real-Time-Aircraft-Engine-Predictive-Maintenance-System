@@ -32,118 +32,118 @@ class ModelEvaluation:
 
         return model, X_test, y_test, rul_clip
 
-    #  EVALUATE 
+    # EVALUATE
     def evaluate(self):
-        model, X_test, y_test, rul_clip = (self.load_artifacts())
+        model, X_test, y_test, rul_clip = self.load_artifacts()
 
         logging.info("Generating predictions...")
 
-        preds = (model.predict(X_test).flatten()* rul_clip)
+        # Model outputs normalized predictions (0-1), denormalize to (0-125)
+        preds = (model.predict(X_test).flatten() * rul_clip)
+        preds = np.clip(preds, 0, rul_clip)
+        
+        # y_test is already in actual RUL scale (0-125), NOT normalized
+        y_true = y_test
+        
+        logging.info(f"Prediction range: {preds.min():.2f} - {preds.max():.2f}")
+        logging.info(f"True RUL range: {y_true.min():.2f} - {y_true.max():.2f}")
 
-        preds = np.clip(preds,0,rul_clip)
-
-        y_true = np.clip(y_test * rul_clip,0,rul_clip)
-
-        #  METRICS 
+        # COMPUTE METRICS
         rmse = compute_rmse(y_true, preds)
         nasa = compute_nasa_score(y_true, preds)
 
         logging.info(f"RMSE: {rmse:.2f}")
         logging.info(f"NASA Score: {nasa:.2f}")
 
-        mlflow.log_metrics({"rmse": rmse, "nasa_score": nasa})
+        # Log evaluation metrics to MLflow
+        mlflow.log_metrics({
+            "test_rmse": rmse,
+            "test_nasa_score": nasa
+        })
 
-        #  RESULTS DF 
+        # RESULTS DATAFRAME
         results = pd.DataFrame({
-
             "true_rul": y_true,
             "pred_rul": preds,
-
             "error": preds - y_true,
-
-            "abs_error": np.abs(
-                preds - y_true
-            )
+            "abs_error": np.abs(preds - y_true)
         })
 
-        results.to_parquet(
-            self.config.results_path,
-            index=False
-        )
+        results.to_parquet(self.config.results_path, index=False)
+        logging.info(f"Results saved at: {self.config.results_path}")
 
-        logging.info(
-            f"Results saved at: {self.config.results_path}"
-        )
+        # CLASSIFICATION METRICS
+        results["critical_true"] = (results["true_rul"] < 30)
+        results["critical_pred"] = (results["pred_rul"] < 30)
+        
+        # Log distribution for debugging
+        n_critical_true = results["critical_true"].sum()
+        n_critical_pred = results["critical_pred"].sum()
+        logging.info(f"Critical engines (true): {n_critical_true}/{len(results)}")
+        logging.info(f"Critical engines (pred): {n_critical_pred}/{len(results)}")
 
-        #  CLASSIFICATION 
-        results["critical_true"] = (
-            results["true_rul"] < 30
+        cls_report = compute_classification_report(
+            results["critical_true"],
+            results["critical_pred"]
         )
+        
+        logging.info(f"Classification report keys: {cls_report.keys()}")
 
-        results["critical_pred"] = (
-            results["pred_rul"] < 30
-        )
-
-        cls_report = compute_classification_report(results["critical_true"], results["critical_pred"])
+        # Extract metrics using the target_names we defined
+        critical_metrics = cls_report.get("Critical", {})
+        
+        precision_critical = critical_metrics.get("precision", 0)
+        recall_critical = critical_metrics.get("recall", 0)
+        f1_critical = critical_metrics.get("f1-score", 0)
+        
+        logging.info(f"Precision (Critical): {precision_critical:.3f}")
+        logging.info(f"Recall (Critical): {recall_critical:.3f}")
+        logging.info(f"F1-Score (Critical): {f1_critical:.3f}")
 
         mlflow.log_metrics({
-            "precision_critical": cls_report.get("True", {}).get("precision", 0),
-            "recall_critical":    cls_report.get("True", {}).get("recall", 0),
-            "f1_critical":        cls_report.get("True", {}).get("f1-score", 0),
+            "precision_critical": precision_critical,
+            "recall_critical": recall_critical,
+            "f1_critical": f1_critical,
         })
 
-        #  SAVE METRICS 
+        # SAVE METRICS
         metrics = {
-
             "rmse": float(rmse),
-
             "nasa_score": float(nasa),
-
             "classification_report": cls_report
         }
 
-        save_json(
-            self.config.metrics_path,
-            metrics
+        save_json(self.config.metrics_path, metrics)
+        logging.info(f"Metrics saved at: {self.config.metrics_path}")
+
+        # GENERATE PLOTS
+        save_confusion_matrix(
+            results["critical_true"],
+            results["critical_pred"],
+            self.config.confusion_matrix_path
+        )
+        save_prediction_plot(
+            y_true,
+            preds,
+            rul_clip,
+            self.config.prediction_plot_path
+        )
+        save_error_distribution(
+            results["error"],
+            self.config.error_distribution_path
         )
 
-        logging.info(
-            f"Metrics saved at: {self.config.metrics_path}"
-        )
-
-        #  PLOTS 
-        save_confusion_matrix(results["critical_true"], results["critical_pred"], self.config.confusion_matrix_path)
-        save_prediction_plot(y_true, preds, rul_clip, self.config.prediction_plot_path)
-        save_error_distribution(results["error"], self.config.error_distribution_path)
-
-        mlflow.log_artifact(str(self.config.confusion_matrix_path), artifact_path="evaluation/plots")
-        mlflow.log_artifact(str(self.config.prediction_plot_path), artifact_path="evaluation/plots")
-        mlflow.log_artifact(str(self.config.error_distribution_path), artifact_path="evaluation/plots")
+        # LOG EVALUATION ARTIFACTS TO MLFLOW
+        mlflow.log_artifact(str(self.config.confusion_matrix_path), artifact_path="evaluation")
+        mlflow.log_artifact(str(self.config.prediction_plot_path), artifact_path="evaluation")
+        mlflow.log_artifact(str(self.config.error_distribution_path), artifact_path="evaluation")
         mlflow.log_artifact(str(self.config.metrics_path), artifact_path="evaluation")
         mlflow.log_artifact(str(self.config.results_path), artifact_path="evaluation")
-        signature = infer_signature(X_test, preds)
-        mlflow.tensorflow.log_model(model, name="model", signature=signature)
 
-        logging.info("Artifacts and model logged to MLflow")
+        logging.info("Evaluation artifacts logged to MLflow")
 
-        #  UPLOAD TO S3 
-        logging.info("Uploading evaluation artifacts to S3...")
-
-        files = [
-            self.config.metrics_path,
-            self.config.results_path,
-            self.config.confusion_matrix_path,
-            self.config.prediction_plot_path,
-            self.config.error_distribution_path
-        ]
-
-        for file in files:
-            self.s3.upload(file, self.config.s3_bucket, f"{self.config.s3_artifact_prefix}{file.name}")
-
-    #  RUN 
+    # RUN
     def run(self):
         logging.info("========== MODEL EVALUATION STARTED ==========")
-        setup_mlflow()
-        with mlflow.start_run(run_name="model-evaluation"):
-            self.evaluate()
+        self.evaluate()
         logging.info("========== MODEL EVALUATION COMPLETED ==========\n")

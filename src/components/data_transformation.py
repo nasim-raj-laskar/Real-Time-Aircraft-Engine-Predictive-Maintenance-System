@@ -14,6 +14,7 @@ class DataTransformation:
         self.config = config
         self.s3 = S3Client()
 
+    #Load Raw data
     def load_data(self):
         logging.info("Loading raw data...")
 
@@ -25,16 +26,19 @@ class DataTransformation:
 
         return train, test, rul
 
+    #Assigning column names
     def assign_columns(self, df):
         cols = ['unit','cycle','os1','os2','os3'] + [f's{i}' for i in range(1, 22)]
         df.columns = cols
         return df
 
+    #Add Target variable RUL to train and test
     def add_rul(self, df):
         max_cycle = df.groupby('unit')['cycle'].transform('max')
         df['RUL'] = (max_cycle - df['cycle']).clip(upper=self.config.rul_clip)
         return df
 
+    #Convert to parquet, scale features and upload to s3
     def transform(self):
         train, test, rul = self.load_data()
 
@@ -64,6 +68,7 @@ class DataTransformation:
 
         return train, test
 
+    #upload to s3 silver layer
     def save_and_upload(self, train, test):
         train_path = self.config.processed_dir / self.config.train_output
         test_path = self.config.processed_dir / self.config.test_output

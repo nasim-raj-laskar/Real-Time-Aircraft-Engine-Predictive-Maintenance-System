@@ -33,12 +33,12 @@ mindmap
 | 00 | [Documentation Index](00_index.md) | This file - navigation and quick reference |
 | 01 | [Dataset Reference](01_dataset.md) | Sub-datasets, column schema, sensor reference, RUL ground truth files |
 | 02 | [Preprocessing Pipeline](02_preprocessing.md) | Sensor dropping, RUL computation, clipping, normalization, windowing, train/val split |
-| 03 | [Feature Engineering](03_feature_engineering.md) | Rolling stats, degradation slope, EWMA, cross-sensor ratios, baseline deviation, streaming feature computation |
-| 04 | [Model Training](04_model_training.md) | XGBoost, LightGBM, LSTM, evaluation metrics, hyperparameter tuning, MLflow tracking, failure risk derivation |
-| 05 | [Inference Service](05_inference_service.md) | FastAPI API contract, Redis feature lookup, latency budget, model hot-swap, Docker setup |
-| 06 | [Streaming Pipeline](06_streaming_pipeline.md) | Kafka producer simulator, feature engineering consumer, offline store writer, event schema, scaling |
-| 07 | [Monitoring and Observability](07_monitoring.md) | Prometheus metrics, Grafana dashboards, Evidently drift detection, alerting rules, structured logging |
-| 08 | [Project Structure and Build Order](08_project_structure.md) | Directory layout, 6-stage build sequence, dependencies, environment setup, key design decisions |
+| 03 | [Feature Engineering](03_feature_engineering.md) | Sequence building for GRU, sliding windows, target normalization, train/val split |
+| 04 | [Model Training & Registry](04_model_training.md) | GRU architecture, training, evaluation, MLflow Model Registry, promotion, S3 upload |
+| 05 | [Inference Service](05_inference_service.md) | FastAPI API design (future implementation), Redis feature lookup, model serving, Docker setup |
+| 06 | [Streaming Pipeline](06_streaming_pipeline.md) | Kafka producer simulator (future), feature engineering consumer, event schema, scaling |
+| 07 | [Monitoring and Observability](07_monitoring.md) | Prometheus metrics (future), Grafana dashboards, Evidently drift detection, alerting rules |
+| 08 | [Project Structure and Build Order](08_project_structure.md) | Directory layout, 7-stage pipeline, dependencies, environment setup, key design decisions |
 | 09 | [System Architecture](09_architecture.md) | High-level architecture, data flow, component interactions, deployment diagrams |
 
 ---
@@ -76,19 +76,20 @@ flowchart LR
 1. Drop sensors: `s1, s5, s6, s8, s10, s13, s15, s16, s18, s19`
 2. Compute RUL = max_cycle − current_cycle
 3. Clip RUL at 125
-4. Normalize per-condition for FD002/FD004
-5. Rolling window features (windows: 10, 20, 30)
+4. Normalize with MinMaxScaler (global for FD001)
+5. Build sequences with window size 30
 6. Group-based train/val split (never split rows randomly)
 
 ### Target metrics
 - FD001 RMSE target: < 15 cycles
-- Inference latency target: < 15ms end-to-end
-- Failure risk alert threshold: > 0.8 (CRITICAL)
+- Model: GRU with 2 layers
+- Training: MLflow tracking, early stopping, sample weighting
 
 ### Build sequence
-Stage 1 → Offline XGBoost baseline on FD001  
-Stage 2 → Improve features, tune, add LSTM, MLflow  
-Stage 3 → Generalize to FD002/FD003/FD004  
-Stage 4 → Kafka + Redis streaming pipeline  
-Stage 5 → FastAPI inference service  
-Stage 6 → Prometheus + Grafana + Evidently monitoring  
+Stage 1 → Data Ingestion from S3  
+Stage 2 → Data Validation  
+Stage 3 → Data Transformation (preprocessing & scaling)  
+Stage 4 → Feature Engineering (sequence building)  
+Stage 5 → Model Training (GRU)  
+Stage 6 → Model Evaluation  
+Stage 7 → Model Registry (promotion & S3 upload)  

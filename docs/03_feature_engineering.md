@@ -2,7 +2,7 @@
 
 ## Overview
 
-Raw normalized sensor readings are a weak input signal on their own. Feature engineering extracts temporal patterns that reveal degradation trends. This document covers all feature types, their rationale, and implementation.
+The current implementation focuses on **sequence building** for the GRU model. Raw normalized sensor readings are transformed into sliding window sequences that capture temporal patterns.
 
 ```mermaid
 mindmap
@@ -10,25 +10,20 @@ mindmap
     Raw Sensors
       11 useful sensors
       After dropping constants
-    Temporal Features
-      Rolling Mean
-      Rolling Std
-      Degradation Slope
-      EWMA
-    Degradation Indicators
-      Baseline Deviation
-      Cumulative Drift
-    Domain Features
-      Temperature Ratios
-      Pressure Efficiency
-      Coolant Ratios
+    Sequence Building
+      Sliding Window
+      Window Size 30
+      Padding for Short Engines
+    Target Normalization
+      RUL / 125
+      Sigmoid Output Range
 ```
 
 ---
 
-## Feature Categories
+## Current Implementation
 
-### 1. Raw Sensor Readings (Baseline)
+### 1. Raw Sensor Readings
 
 The 11 useful sensors after dropping constants:
 
@@ -36,173 +31,245 @@ The 11 useful sensors after dropping constants:
 s2, s3, s4, s7, s9, s11, s12, s14, s17, s20, s21
 ```
 
-These alone are sufficient for a baseline model but will underperform without temporal context.
+These are used directly as input features for the GRU model.
 
 ---
 
-### 2. Rolling Statistics
+### 2. Sequence Building for GRU
 
-Capture short and medium-term trends by computing statistics over a sliding window per engine.
+The core feature engineering step is creating sliding window sequences:
 
 ```python
-WINDOWS = [10, 20, 30]  # cycles
+WINDOW_SIZE = 30  # cycles
 
-def rolling_stats(df: pd.DataFrame, sensors: list[str], windows: list[int]) -> pd.DataFrame:
-    df = df.sort_values(['unit', 'cycle'])
-    for w in windows:
-        for s in sensors:
-            grp = df.groupby('unit')[s]
-            df[f'{s}_rmean_{w}'] = grp.transform(
-                lambda x: x.rolling(w, min_periods=1).mean()
-            )
-            df[f'{s}_rstd_{w}'] = grp.transform(
-                lambda x: x.rolling(w, min_periods=1).std().fillna(0)
-            )
-    return df
+def build_sequences(df, feature_cols, window_size=30):
+    X, y = [], []
+    
+    for _, engine_df in df.groupby('unit'):
+        engine_df = engine_df.sort_values('cycle')
+        data = engine_df[feature_cols].values
+        labels = engine_df['RUL'].values
+        
+        # Sliding window
+        for i in range(len(data) - window_size + 1):
+            X.append(data[i:i+window_size])
+            y.append(labels[i+window_size-1])
+    
+    return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
 ```
 
-This adds `11 sensors × 2 stats × 3 windows = 66` features on top of the 11 raw readings.
-
-Why multiple windows:
-- Short window (10): captures recent sharp changes
-- Medium window (20): smooths noise, shows trend direction
-- Long window (30): captures slow degradation drift
+This creates sequences of shape `(n_samples, 30, 11)` where:
+- 30 = window size (timesteps)
+- 11 = number of sensors (features)
 
 ---
 
-### 3. Degradation Slope (Linear Trend)
+### 3. Test Set Sequence Building
 
-The slope of a sensor over the last N cycles is a direct measure of how fast it is changing. A steepening slope signals accelerating degradation.
+For test data, only the **last window** per engine is used:
 
 ```python
-from numpy.polynomial import polynomial as P
+def build_last_sequences(df, feature_cols, window_size=30):
+    X, y = [], []
+    
+    for _, engine_df in df.groupby('unit'):
+        engine_df = engine_df.sort_values('cycle')
+        data = engine_df[feature_cols].values
+        
+        if len(data) >= window_size:
+            X.append(data[-window_size:])
+        else:
+            # Pad with zeros if engine has fewer than window_size cycles
+            pad = np.zeros((window_size - len(data), len(feature_cols)))
+            X.append(np.vstack([pad, data]))
+        
+        y.append(engine_df['RUL'].iloc[-1])
+    
+    return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
+```
 
-def rolling_slope(series: pd.Series, window: int) -> pd.Series:
+---
+
+### 4. Target Normalization
+
+RUL values are normalized to [0, 1] for the sigmoid output:
+
+```python
+RUL_CLIP = 125
+
+y_train = (y_train_raw / RUL_CLIP).astype(np.float32)
+y_val = (y_val_raw / RUL_CLIP).astype(np.float32)
+y_test = np.clip(y_test_raw, 0, RUL_CLIP).astype(np.float32)
+```
+
+---
+
+## Implementation Details
+
+The feature engineering is implemented in `src/components/feature_engineering.py`:
+
+```python
+class FeatureEngineering:
+    def __init__(self, config: DataFeatureEngineeringConfig):
+        self.config = config  # window_size=30, rul_clip=125
+    
+    def build_sequences(self, df, feature_cols):
+        X, y = [], []
+        for _, eng in df.groupby('unit'):
+            eng = eng.sort_values('cycle')
+            data = eng[feature_cols].values
+            labels = eng['RUL'].values
+            
+            for i in range(len(data) - self.config.window_size + 1):
+                X.append(data[i:i+self.config.window_size])
+                y.append(labels[i+self.config.window_size-1])
+        
+        return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
+    
+    def build_last_sequences(self, df, feature_cols):
+        X, y = [], []
+        for _, eng in df.groupby('unit'):
+            eng = eng.sort_values('cycle')
+            data = eng[feature_cols].values
+            
+            if len(data) >= self.config.window_size:
+                X.append(data[-self.config.window_size:])
+            else:
+                pad = np.zeros((self.config.window_size - len(data), len(feature_cols)))
+                X.append(np.vstack([pad, data]))
+            
+            y.append(eng['RUL'].iloc[-1])
+        
+        return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
+```
+
+---
+
+## Configuration
+
+Feature engineering parameters are defined in `config/features.yaml`:
+
+```yaml
+features:
+  window_size: 30
+  test_size: 0.2
+  random_state: 42
+```
+
+And in `config/transform.yaml`:
+
+```yaml
+rul_clip: 125
+```
+
+---
+
+## Data Split Strategy
+
+Train/validation split is done at the **engine level** to prevent data leakage:
+
+```python
+from sklearn.model_selection import GroupShuffleSplit
+
+gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+train_idx, val_idx = next(gss.split(train_df, groups=train_df['unit']))
+
+train_split = train_df.iloc[train_idx]
+val_split = train_df.iloc[val_idx]
+```
+
+This ensures that all cycles from a single engine stay together in either train or validation set.
+
+---
+
+## Output Artifacts
+
+The feature engineering stage produces:
+
+```
+artifacts/data_feature_engineering/
+├── X_train.npy              # Training sequences (n_train, 30, 11)
+├── y_train.npy              # Training labels (n_train,)
+├── X_val.npy                # Validation sequences (n_val, 30, 11)
+├── y_val.npy                # Validation labels (n_val,)
+├── X_test.npy               # Test sequences (n_test, 30, 11)
+├── y_test.npy               # Test labels (n_test,)
+└── feature_config.json      # Metadata
+```
+
+`feature_config.json` contains:
+```json
+{
+  "window_size": 30,
+  "features": ["s2", "s3", "s4", "s7", "s9", "s11", "s12", "s14", "s17", "s20", "s21"],
+  "rul_clip": 125,
+  "scaler_path": "artifacts/scaler.pkl"
+}
+```
+
+---
+
+## Pipeline Execution
+
+Run feature engineering:
+
+```bash
+python main.py  # Runs all stages including feature engineering
+```
+
+Or run individually:
+
+```python
+from src.pipeline.feature_engineering_pipeline import FeatureEngineeringPipeline
+
+pipeline = FeatureEngineeringPipeline()
+pipeline.initiate_feature_engineering()
+```
+
+---
+
+## Future Enhancements
+
+For improved model performance, consider adding:
+
+### Rolling Statistics
+```python
+# Rolling mean/std over windows [10, 20, 30]
+for w in [10, 20, 30]:
+    for s in sensors:
+        df[f'{s}_rmean_{w}'] = df.groupby('unit')[s].transform(
+            lambda x: x.rolling(w, min_periods=1).mean()
+        )
+```
+
+### Degradation Slope
+```python
+# Linear trend over last 30 cycles
+def rolling_slope(series, window=30):
     def slope(x):
         if len(x) < 2:
             return 0.0
         t = np.arange(len(x))
-        return np.polyfit(t, x, 1)[0]  # coefficient of degree 1
+        return np.polyfit(t, x, 1)[0]
     return series.rolling(window, min_periods=2).apply(slope, raw=True)
-
-for s in KEEP_SENSORS:
-    df[f'{s}_slope_30'] = df.groupby('unit')[s].transform(
-        lambda x: rolling_slope(x, 30)
-    )
 ```
 
----
-
-### 4. Exponential Weighted Mean (EWMA)
-
-Gives more weight to recent cycles than older ones. More sensitive to sudden changes than a simple rolling mean.
-
+### Baseline Deviation
 ```python
-ALPHAS = [0.1, 0.3]  # smoothing factors; higher = more weight on recent
-
-for alpha in ALPHAS:
-    for s in KEEP_SENSORS:
-        df[f'{s}_ewm_{alpha}'] = df.groupby('unit')[s].transform(
-            lambda x: x.ewm(alpha=alpha, adjust=False).mean()
-        )
+# Deviation from healthy baseline (first 10 cycles)
+baseline = df[df['cycle'] <= 10].groupby('unit')[sensors].mean()
+df = df.merge(baseline, on='unit', suffixes=('', '_baseline'))
+for s in sensors:
+    df[f'{s}_dev'] = df[s] - df[f'{s}_baseline']
 ```
 
----
-
-### 5. Cycle-Based Features
-
-```python
-# Normalized cycle position within engine life (only usable during training)
-# For inference, use rolling features instead — max_cycle is unknown
-df['cycle_norm'] = df.groupby('unit')['cycle'].transform(
-    lambda x: x / x.max()
-)
-```
-
-Note: `cycle_norm` uses max cycle which is unknown at inference time. Use it only as an auxiliary training signal or replace with a proxy like cumulative sensor deviation.
+These features would be beneficial for tree-based models (XGBoost, LightGBM) but are not necessary for the current GRU implementation, which learns temporal patterns automatically.
 
 ---
 
-### 6. Cross-Sensor Interaction Features
+## Feature Engineering for Streaming (Future)
 
-Some sensor ratios are physically meaningful for turbofan degradation:
-
-```python
-# Temperature ratio: HPC outlet / LPC outlet — rises as HPC degrades
-df['temp_ratio'] = df['s3'] / (df['s2'] + 1e-8)
-
-# Pressure efficiency proxy
-df['pressure_ratio'] = df['s7'] / (df['s11'] + 1e-8)
-
-# Coolant bleed ratio
-df['bleed_ratio'] = df['s20'] / (df['s21'] + 1e-8)
-```
-
-Use these cautiously — they can introduce instability if a denominator sensor is near zero after normalization.
-
----
-
-### 7. Cumulative Deviation from Healthy Baseline
-
-Compute each engine's healthy baseline (first N cycles) and track cumulative deviation:
-
-```python
-BASELINE_CYCLES = 10
-
-def cumulative_deviation(df: pd.DataFrame, sensors: list[str]) -> pd.DataFrame:
-    baselines = (
-        df[df['cycle'] <= BASELINE_CYCLES]
-        .groupby('unit')[sensors]
-        .mean()
-        .rename(columns={s: f'{s}_baseline' for s in sensors})
-    )
-    df = df.merge(baselines, on='unit', how='left')
-    for s in sensors:
-        df[f'{s}_dev'] = df[s] - df[f'{s}_baseline']
-        df.drop(columns=[f'{s}_baseline'], inplace=True)
-    return df
-
-train = cumulative_deviation(train, KEEP_SENSORS)
-```
-
-This is one of the strongest single features — it directly measures how far the engine has drifted from its healthy state.
-
----
-
-## Feature Set Summary
-
-| Feature Group | Count | Notes |
-|---------------|-------|-------|
-| Raw sensors | 11 | After dropping constants |
-| Rolling mean (3 windows) | 33 | Windows: 10, 20, 30 |
-| Rolling std (3 windows) | 33 | Windows: 10, 20, 30 |
-| Degradation slope | 11 | Window: 30 |
-| EWMA (2 alphas) | 22 | Alphas: 0.1, 0.3 |
-| Cross-sensor ratios | 3 | temp_ratio, pressure_ratio, bleed_ratio |
-| Cumulative deviation | 11 | From healthy baseline |
-| **Total** | **124** | |
-
-For LSTM: use only raw sensors (11) — the network learns temporal patterns itself. Rolling features are for tree models.
-
----
-
-## Feature Importance (Expected)
-
-Based on published C-MAPSS research, the highest-signal sensors are:
-
-1. `s11` (Ps30 — static pressure at HPC outlet) — most correlated with HPC degradation
-2. `s12` (phi — fuel flow ratio) — rises as efficiency drops
-3. `s4` (T50 — LPT outlet temperature) — rises with degradation
-4. `s9` (Nc — core speed) — changes with load and wear
-5. `s14` (NRc — corrected core speed)
-
-Validate this on your data using XGBoost feature importance after training.
-
----
-
-## Feature Engineering for Streaming Inference
-
-In the real-time pipeline, features must be computed incrementally as new cycles arrive.
+For real-time inference, features must be computed incrementally:
 
 ```mermaid
 sequenceDiagram
@@ -214,25 +281,14 @@ sequenceDiagram
     K->>C: New cycle data
     C->>R: Get rolling buffer (last 30 cycles)
     C->>C: Append new cycle
-    C->>C: Compute rolling stats
-    C->>R: Get baseline (first 10 cycles)
-    C->>C: Compute deviation features
+    C->>C: Build sequence
     C->>R: Write feature vector
     R->>M: Feature lookup at inference
     M->>M: Predict RUL
 ```
 
-For each new Kafka event (one cycle):
-1. Append to engine's rolling buffer in Redis (keep last 30 cycles)
-2. Compute rolling mean/std/slope on the buffer
-3. Retrieve healthy baseline from Redis (set at engine startup)
-4. Compute deviation features
-5. Assemble feature vector → pass to model
-
-```python
-# Redis key structure
-# engine:{id}:buffer  → list of last 30 cycle sensor readings (JSON)
-# engine:{id}:baseline → mean of first 10 cycles (JSON)
+Redis key structure:
 ```
-
-The feature computation logic must be identical between training and inference — this is the core value of a feature store.
+engine:{id}:buffer  → list of last 30 cycle sensor readings (JSON)
+engine:{id}:features → feature vector for inference
+```
