@@ -38,9 +38,15 @@ class ModelEvaluation:
 
         logging.info("Generating predictions...")
 
+        # Model outputs normalized predictions (0-1), denormalize to (0-125)
         preds = (model.predict(X_test).flatten() * rul_clip)
         preds = np.clip(preds, 0, rul_clip)
-        y_true = np.clip(y_test * rul_clip, 0, rul_clip)
+        
+        # y_test is already in actual RUL scale (0-125), NOT normalized
+        y_true = y_test
+        
+        logging.info(f"Prediction range: {preds.min():.2f} - {preds.max():.2f}")
+        logging.info(f"True RUL range: {y_true.min():.2f} - {y_true.max():.2f}")
 
         # COMPUTE METRICS
         rmse = compute_rmse(y_true, preds)
@@ -69,16 +75,35 @@ class ModelEvaluation:
         # CLASSIFICATION METRICS
         results["critical_true"] = (results["true_rul"] < 30)
         results["critical_pred"] = (results["pred_rul"] < 30)
+        
+        # Log distribution for debugging
+        n_critical_true = results["critical_true"].sum()
+        n_critical_pred = results["critical_pred"].sum()
+        logging.info(f"Critical engines (true): {n_critical_true}/{len(results)}")
+        logging.info(f"Critical engines (pred): {n_critical_pred}/{len(results)}")
 
         cls_report = compute_classification_report(
             results["critical_true"],
             results["critical_pred"]
         )
+        
+        logging.info(f"Classification report keys: {cls_report.keys()}")
+
+        # Extract metrics using the target_names we defined
+        critical_metrics = cls_report.get("Critical", {})
+        
+        precision_critical = critical_metrics.get("precision", 0)
+        recall_critical = critical_metrics.get("recall", 0)
+        f1_critical = critical_metrics.get("f1-score", 0)
+        
+        logging.info(f"Precision (Critical): {precision_critical:.3f}")
+        logging.info(f"Recall (Critical): {recall_critical:.3f}")
+        logging.info(f"F1-Score (Critical): {f1_critical:.3f}")
 
         mlflow.log_metrics({
-            "precision_critical": cls_report.get("True", {}).get("precision", 0),
-            "recall_critical": cls_report.get("True", {}).get("recall", 0),
-            "f1_critical": cls_report.get("True", {}).get("f1-score", 0),
+            "precision_critical": precision_critical,
+            "recall_critical": recall_critical,
+            "f1_critical": f1_critical,
         })
 
         # SAVE METRICS

@@ -20,16 +20,12 @@ class ModelRegistry:
     # LOAD METRICS
     def load_metrics(self):
         logging.info("Loading evaluation metrics...")
-
         with open(self.config.metrics_path) as f:
             metrics = json.load(f)
-
         rmse = metrics["rmse"]
         nasa = metrics["nasa_score"]
-
         logging.info(f"RMSE: {rmse}")
         logging.info(f"NASA Score: {nasa}")
-
         return rmse, nasa
 
     # PROMOTION POLICY CHECK

@@ -12,4 +12,18 @@ def compute_nasa_score(y_true, y_pred):
 
 
 def compute_classification_report(y_true, y_pred):
-    return classification_report(y_true, y_pred, output_dict=True, zero_division=0)
+    """Compute classification report with proper handling of boolean labels."""
+    # Convert to numpy arrays and ensure boolean type
+    y_true = np.array(y_true, dtype=bool)
+    y_pred = np.array(y_pred, dtype=bool)
+    
+    # Get classification report
+    report = classification_report(
+        y_true, 
+        y_pred, 
+        output_dict=True, 
+        zero_division=0,
+        target_names=['Non-Critical', 'Critical']
+    )
+    
+    return report

@@ -1,30 +1,30 @@
 {
-    "rmse": 59.97136767997083,
-    "nasa_score": 85108.5625,
+    "rmse": 15.282471652822915,
+    "nasa_score": 444.59088134765625,
     "classification_report": {
-        "False": {
-            "precision": 1.0,
-            "recall": 0.79,
-            "f1-score": 0.88268156424581,
-            "support": 100.0
+        "Non-Critical": {
+            "precision": 0.9487179487179487,
+            "recall": 0.9866666666666667,
+            "f1-score": 0.9673202614379085,
+            "support": 75.0
         },
-        "True": {
-            "precision": 0.0,
-            "recall": 0.0,
-            "f1-score": 0.0,
-            "support": 0.0
+        "Critical": {
+            "precision": 0.9545454545454546,
+            "recall": 0.84,
+            "f1-score": 0.8936170212765957,
+            "support": 25.0
         },
-        "accuracy": 0.79,
+        "accuracy": 0.95,
         "macro avg": {
-            "precision": 0.5,
-            "recall": 0.395,
-            "f1-score": 0.441340782122905,
+            "precision": 0.9516317016317016,
+            "recall": 0.9133333333333333,
+            "f1-score": 0.930468641357252,
             "support": 100.0
         },
         "weighted avg": {
-            "precision": 1.0,
-            "recall": 0.79,
-            "f1-score": 0.8826815642458101,
+            "precision": 0.9501748251748251,
+            "recall": 0.95,
+            "f1-score": 0.9488944513975802,
             "support": 100.0
         }
     }
