@@ -58,3 +58,10 @@ model_evaluation:
   prediction_plot_path: artifacts/model_evaluation/pred_vs_true.png
   error_distribution_path: artifacts/model_evaluation/error_distribution.png
   s3_artifact_prefix: artifacts/
+
+#---model registration config---
+model_registry:
+  root_dir: artifacts/model_registry
+  model_path: artifacts/model_trainer/model.keras
+  metrics_path: artifacts/model_evaluation/metrics.json
+

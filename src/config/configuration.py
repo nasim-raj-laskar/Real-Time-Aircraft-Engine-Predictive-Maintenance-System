@@ -15,7 +15,8 @@ class ConfigurationManager:
         schema_filepath=SCHEMA,
         models_filepath=MODELS,
         transform_filepath=TRANSFORM,
-        features_filepath=FEATURES
+        features_filepath=FEATURES,
+        registor_filepath=REGISTOR
 ):
 
         self.config = read_yaml(config_filepath)
@@ -24,6 +25,7 @@ class ConfigurationManager:
         self.models = read_yaml(models_filepath)
         self.transform = read_yaml(transform_filepath)
         self.features = read_yaml(features_filepath)
+        self.registor = read_yaml(registor_filepath)
 
         create_directories([self.config.artifacts_root])
 

@@ -1,0 +1,5 @@
+  promotion_thresholds:
+    rmse: 60
+    nasa_score: 70000
+    registered_model_name: aircraft-rul-gru
+    stage: Production
