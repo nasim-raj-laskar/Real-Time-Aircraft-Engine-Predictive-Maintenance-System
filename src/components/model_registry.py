@@ -76,11 +76,14 @@ class ModelRegistry:
     def promote_model(self, version):
         logging.info(f"Promoting version {version} to {self.config.stage}")
 
-        self.client.transition_model_version_stage(
-            name=self.config.registered_model_name,
-            version=version,
-            stage=self.config.stage
-        )
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=FutureWarning)
+            self.client.transition_model_version_stage(
+                name=self.config.registered_model_name,
+                version=version,
+                stage=self.config.stage
+            )
 
         logging.info("Promotion successful")
 

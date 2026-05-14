@@ -1,6 +1,6 @@
+from src.utils.suppress_warnings import *
 from src.logging.logger import logging
 from src.exception.exception import CustomException
-import sys
 from src.pipeline.data_ingestion_pipeline import DataIngestionPipeline
 from src.pipeline.data_validation_pipeline import DataValidationPipeline
 from src.pipeline.data_transformation_pipeline import DataTransformationPipeline
@@ -9,7 +9,7 @@ from src.pipeline.model_trainer_pipeline import ModelTrainingPipeline
 from src.pipeline.model_evaluation_pipeline import ModelEvaluationPipeline
 from src.pipeline.model_registry_pipeline import ModelRegistryPipeline
 from src.utils.mlflow_setup import setup_mlflow
-import mlflow
+import mlflow, sys
 
 # Setup MLflow once for the entire pipeline
 setup_mlflow()
@@ -87,4 +87,5 @@ with mlflow.start_run(run_name="aircraft-engine-rul-pipeline"):
         logging.error(f"Error in stage {STAGE_NAME}")
         raise CustomException(e, sys)
 
-logging.info("========== PIPELINE COMPLETED SUCCESSFULLY ==========")
+logging.info("========== PIPELINE COMPLETED SUCCESSFULLY ==========\n")
+
