@@ -34,11 +34,11 @@ mindmap
 | 01 | [Dataset Reference](01_dataset.md) | Sub-datasets, column schema, sensor reference, RUL ground truth files |
 | 02 | [Preprocessing Pipeline](02_preprocessing.md) | Sensor dropping, RUL computation, clipping, normalization, windowing, train/val split |
 | 03 | [Feature Engineering](03_feature_engineering.md) | Sequence building for GRU, sliding windows, target normalization, train/val split |
-| 04 | [Model Training](04_model_training.md) | GRU architecture, sample weighting, MLflow tracking, callbacks, model artifacts |
+| 04 | [Model Training & Registry](04_model_training.md) | GRU architecture, training, evaluation, MLflow Model Registry, promotion, S3 upload |
 | 05 | [Inference Service](05_inference_service.md) | FastAPI API design (future implementation), Redis feature lookup, model serving, Docker setup |
 | 06 | [Streaming Pipeline](06_streaming_pipeline.md) | Kafka producer simulator (future), feature engineering consumer, event schema, scaling |
 | 07 | [Monitoring and Observability](07_monitoring.md) | Prometheus metrics (future), Grafana dashboards, Evidently drift detection, alerting rules |
-| 08 | [Project Structure and Build Order](08_project_structure.md) | Directory layout, 6-stage pipeline, dependencies, environment setup, key design decisions |
+| 08 | [Project Structure and Build Order](08_project_structure.md) | Directory layout, 7-stage pipeline, dependencies, environment setup, key design decisions |
 | 09 | [System Architecture](09_architecture.md) | High-level architecture, data flow, component interactions, deployment diagrams |
 
 ---
@@ -92,3 +92,4 @@ Stage 3 → Data Transformation (preprocessing & scaling)
 Stage 4 → Feature Engineering (sequence building)  
 Stage 5 → Model Training (GRU)  
 Stage 6 → Model Evaluation  
+Stage 7 → Model Registry (promotion & S3 upload)  

@@ -240,3 +240,277 @@ flowchart TD
     style F fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
     style J fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
 ```
+
+
+---
+
+## Model Registry and Deployment
+
+After training and evaluation, models are automatically registered to MLflow Model Registry with quality gates.
+
+### Promotion Policy
+
+Models must meet these criteria to be promoted:
+
+```yaml
+# config/registor.yaml
+registered_model_name: aircraft-rul-gru
+
+promotion_thresholds:
+  rmse: 20.0          # Max acceptable RMSE (cycles)
+  nasa_score: 2000.0  # Max acceptable NASA score
+
+stage: Production     # Target stage after promotion
+```
+
+**Decision Logic:**
+```python
+if rmse <= 20.0 AND nasa_score <= 2000.0:
+    ✅ PROMOTE to Production
+else:
+    ❌ REJECT (model not good enough)
+```
+
+---
+
+### Registry Workflow
+
+```mermaid
+flowchart TD
+    A[Model Evaluation Complete] --> B[Load Metrics]
+    B --> C{Pass Thresholds?}
+    
+    C -->|No| D[Reject Model]
+    D --> E[Log Warning]
+    
+    C -->|Yes| F[Register to MLflow]
+    F --> G[Create New Version]
+    G --> H[Promote to Stage]
+    H --> I[Upload to S3]
+    I --> J[Deployment Ready]
+    
+    style C fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    style D fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
+    style J fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
+```
+
+---
+
+### Model Versioning
+
+Each training run creates a new version:
+
+```
+aircraft-rul-gru
+├── Version 1 (RMSE: 18.5, Stage: Archived)
+├── Version 2 (RMSE: 16.2, Stage: Staging)
+└── Version 3 (RMSE: 15.3, Stage: Production) ← Current
+```
+
+**Accessing Models:**
+
+```python
+import mlflow
+
+# Load latest production model
+model = mlflow.tensorflow.load_model(
+    model_uri="models:/aircraft-rul-gru/Production"
+)
+
+# Load specific version
+model = mlflow.tensorflow.load_model(
+    model_uri="models:/aircraft-rul-gru/3"
+)
+```
+
+---
+
+### S3 Artifact Upload
+
+All artifacts are uploaded to S3 after successful promotion:
+
+```
+s3://aircraft-engine-data/artifacts/
+├── model.keras                    # Trained model
+├── history.json                   # Training history
+├── metrics.json                   # Evaluation metrics
+├── results.parquet                # Prediction results
+├── confusion_matrix.png           # Confusion matrix plot
+├── pred_vs_true.png              # Prediction vs true plot
+└── error_distribution.png        # Error distribution plot
+```
+
+---
+
+### Deployment Workflow
+
+**1. Automated Registration (via pipeline):**
+```bash
+python main.py
+# → Model registered to MLflow
+# → Artifacts uploaded to S3
+```
+
+**2. Download for Deployment:**
+```bash
+aws s3 cp s3://aircraft-engine-data/artifacts/model.keras ./model.keras
+aws s3 cp s3://aircraft-engine-data/artifacts/scaler.pkl ./scaler.pkl
+```
+
+**3. Load in Inference Service:**
+```python
+# In FastAPI app
+model = tf.keras.models.load_model("model.keras")
+scaler = joblib.load("scaler.pkl")
+
+@app.post("/predict")
+async def predict(data: SensorData):
+    X = preprocess(data.sensor_data)
+    rul_pred = model.predict(X) * 125
+    return {"rul": rul_pred, "risk": 1 - rul_pred/125}
+```
+
+---
+
+### Promotion Scenarios
+
+**Scenario 1: Model Passes ✅**
+```
+Metrics:
+  RMSE: 15.28 ≤ 20.0 ✅
+  NASA Score: 444.6 ≤ 2000.0 ✅
+
+Actions:
+  ✓ Register to MLflow
+  ✓ Create version 3
+  ✓ Promote to Production
+  ✓ Upload to S3
+
+Result: Model deployed!
+```
+
+**Scenario 2: Model Fails ❌**
+```
+Metrics:
+  RMSE: 25.5 > 20.0 ❌
+  NASA Score: 3500 > 2000.0 ❌
+
+Actions:
+  ✗ Skip registration
+  ✗ Skip promotion
+  ✗ Skip S3 upload
+
+Result: Model rejected, retrain needed
+```
+
+---
+
+### Configuration
+
+**config/config.yaml:**
+```yaml
+model_registry:
+  root_dir: artifacts/model_registry
+  model_path: artifacts/model_trainer/model.keras
+  gold_dir: artifacts/data_feature_engineering
+  metrics_path: artifacts/model_evaluation/metrics.json
+  s3_artifact_prefix: artifacts/
+```
+
+**config/registor.yaml:**
+```yaml
+registered_model_name: aircraft-rul-gru
+
+promotion_thresholds:
+  rmse: 20.0
+  nasa_score: 2000.0
+
+stage: Production
+```
+
+---
+
+### Best Practices
+
+**1. Threshold Tuning:**
+```yaml
+# Conservative (fewer deployments, higher quality)
+rmse: 15.0
+nasa_score: 1000.0
+
+# Balanced (current)
+rmse: 20.0
+nasa_score: 2000.0
+
+# Aggressive (more deployments, accept lower quality)
+rmse: 25.0
+nasa_score: 3000.0
+```
+
+**2. Model Rollback:**
+```python
+# Rollback to previous version if production model fails
+client.transition_model_version_stage(
+    name="aircraft-rul-gru",
+    version=2,  # Previous good version
+    stage="Production"
+)
+```
+
+**3. A/B Testing:**
+```python
+# Champion vs Challenger
+model_a = mlflow.tensorflow.load_model("models:/aircraft-rul-gru/2")
+model_b = mlflow.tensorflow.load_model("models:/aircraft-rul-gru/3")
+
+# Route 90% to A, 10% to B
+if random.random() < 0.9:
+    prediction = model_a.predict(X)
+else:
+    prediction = model_b.predict(X)
+```
+
+---
+
+### Troubleshooting
+
+**Issue: Model Not Registered**
+
+*Cause:* Failed promotion thresholds
+
+*Solution:*
+```bash
+# Check metrics
+cat artifacts/model_evaluation/metrics.json
+
+# Adjust thresholds in config/registor.yaml
+# Or retrain with more epochs
+```
+
+**Issue: S3 Upload Failed**
+
+*Cause:* AWS credentials not configured
+
+*Solution:*
+```bash
+aws configure
+# OR
+export AWS_ACCESS_KEY_ID=your_key
+export AWS_SECRET_ACCESS_KEY=your_secret
+```
+
+---
+
+## Summary
+
+The complete training and deployment pipeline ensures:
+- ✅ Automated quality gates prevent bad models from reaching production
+- ✅ All artifacts are versioned and tracked in MLflow
+- ✅ Models are stored in S3 for deployment
+- ✅ Clear promotion path from training to production
+- ✅ Easy rollback if issues occur
+
+**Run the complete pipeline:**
+```bash
+python main.py
+```
