@@ -63,5 +63,7 @@ model_evaluation:
 model_registry:
   root_dir: artifacts/model_registry
   model_path: artifacts/model_trainer/model.keras
+  gold_dir: artifacts/data_feature_engineering
   metrics_path: artifacts/model_evaluation/metrics.json
+  s3_artifact_prefix: artifacts/
 

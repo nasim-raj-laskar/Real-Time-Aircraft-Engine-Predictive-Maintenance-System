@@ -81,3 +81,16 @@ class ModelEvaluationConfig:
     error_distribution_path: Path
     s3_bucket: str
     s3_artifact_prefix: str
+
+@dataclass
+class ModelRegistryConfig:
+    root_dir: Path
+    model_path: Path
+    gold_dir: Path
+    metrics_path: Path
+    registered_model_name: str
+    rmse_threshold: float
+    nasa_threshold: float
+    stage: str
+    s3_bucket: str
+    s3_artifact_prefix: str
