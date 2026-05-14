@@ -30,9 +30,11 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 │   ├── train_FD001.txt
 │   ├── test_FD001.txt
 │   ├── RUL_FD001.txt
-│   └── ...
+│   ├── readme.txt
+│   └── Damage Propagation Modeling.pdf
 │
 ├── docs/                           # This documentation
+│   ├── 00_index.md
 │   ├── 01_dataset.md
 │   ├── 02_preprocessing.md
 │   ├── 03_feature_engineering.md
@@ -40,60 +42,120 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 │   ├── 05_inference_service.md
 │   ├── 06_streaming_pipeline.md
 │   ├── 07_monitoring.md
-│   └── 08_project_structure.md
+│   ├── 08_project_structure.md
+│   └── 09_architecture.md
 │
-├── notebooks/                      # Exploratory analysis
-│   ├── 01_eda.ipynb
-│   ├── 02_feature_analysis.ipynb
-│   └── 03_model_experiments.ipynb
+├── notebook/                       # Exploratory analysis
+│   └── test-rul.ipynb
+│
+├── config/                         # Configuration files
+│   ├── config.yaml                 # Main pipeline config
+│   ├── features.yaml               # Feature engineering params
+│   ├── model.yaml                  # Model hyperparameters
+│   ├── params.yaml                 # Training parameters
+│   ├── schema.yaml                 # Data schema
+│   └── transform.yaml              # Transformation config
 │
 ├── src/
-│   ├── preprocessing/
+│   ├── components/                 # Core pipeline components
 │   │   ├── __init__.py
-│   │   ├── loader.py               # load_data()
-│   │   ├── cleaner.py              # drop sensors, clip RUL
-│   │   └── normalizer.py           # scalers, condition clustering
+│   │   ├── data_ingestion.py       # S3 data download
+│   │   ├── data_validation.py      # Schema validation
+│   │   ├── data_transformation.py  # Preprocessing & scaling
+│   │   ├── feature_engineering.py  # Sequence building
+│   │   ├── model_training.py       # GRU model training
+│   │   └── model_evaluation.py     # Metrics & plots
+│   │
+│   ├── pipeline/                   # Pipeline orchestration
+│   │   ├── __init__.py
+│   │   ├── data_ingestion_pipeline.py
+│   │   ├── data_validation_pipeline.py
+│   │   ├── data_transformation_pipeline.py
+│   │   ├── feature_engineering_pipeline.py
+│   │   ├── model_trainer_pipeline.py
+│   │   └── model_evaluation_pipeline.py
+│   │
+│   ├── config/
+│   │   ├── __init__.py
+│   │   └── configuration.py         # Config loader
+│   │
+│   ├── entity/
+│   │   ├── __init__.py
+│   │   └── config_entity.py        # Config dataclasses
+│   │
+│   ├── cloud/
+│   │   ├── __init__.py
+│   │   └── s3.py                   # S3 client wrapper
+│   │
+│   ├── metrics/
+│   │   ├── __init__.py
+│   │   ├── scores.py               # RMSE, NASA score
+│   │   └── plot.py                 # Visualization
+│   │
+│   ├── utils/
+│   │   ├── common.py               # Helper functions
+│   │   └── mlflow_setup.py         # MLflow configuration
+│   │
+│   ├── logging/
+│   │   ├── __init__.py
+│   │   └── logger.py               # Structured logging
+│   │
+│   ├── exception/
+│   │   ├── __init__.py
+│   │   └── exception.py            # Custom exceptions
+│   │
+│   ├── constants/
+│   │   └── __init__.py             # Global constants
 │   │
 │   ├── features/
-│   │   ├── __init__.py
-│   │   ├── rolling.py              # rolling mean/std/slope
-│   │   ├── deviation.py            # baseline deviation features
-│   │   └── sequences.py            # sliding window builder for LSTM
+│   │   └── __init__.py
 │   │
-│   ├── training/
-│   │   ├── __init__.py
-│   │   ├── train_xgboost.py
-│   │   ├── train_lstm.py
-│   │   └── evaluate.py             # rmse, nasa_score
-│   │
-│   ├── streaming/
-│   │   ├── __init__.py
-│   │   ├── producer.py             # Kafka CSV simulator
-│   │   └── feature_consumer.py     # Kafka → Redis feature writer
-│   │
-│   ├── inference/
-│   │   ├── __init__.py
-│   │   ├── app.py                  # FastAPI application
-│   │   ├── predictor.py            # model loading and prediction logic
-│   │   └── feature_store.py        # Redis read/write helpers
-│   │
-│   └── monitoring/
-│       ├── __init__.py
-│       ├── metrics.py              # Prometheus metrics definitions
-│       └── drift_detector.py       # Evidently drift reports
+│   └── __init__.py
 │
-├── artifacts/                      # Saved models and scalers (gitignored)
-│   ├── scaler_FD001.pkl
-│   ├── feature_cols.json
-│   └── model_FD001/
+├── artifacts/                      # Generated artifacts (gitignored)
+│   ├── data_ingestion/
+│   │   └── data/                   # Downloaded raw data
+│   ├── data_validation/
+│   │   └── status.json
+│   ├── data_transformation/
+│   │   ├── processed/              # Parquet files
+│   │   └── scaler.pkl
+│   ├── data_feature_engineering/
+│   │   ├── X_train.npy
+│   │   ├── y_train.npy
+│   │   ├── X_val.npy
+│   │   ├── y_val.npy
+│   │   ├── X_test.npy
+│   │   ├── y_test.npy
+│   │   └── feature_config.json
+│   ├── model_trainer/
+│   │   ├── model.keras
+│   │   └── history.json
+│   ├── model_evaluation/
+│   │   ├── metrics.json
+│   │   ├── results.parquet
+│   │   ├── confusion_matrix.png
+│   │   ├── pred_vs_true.png
+│   │   └── error_distribution.png
+│   ├── config.json
+│   ├── model.keras
+│   └── scaler.pkl
 │
-├── tests/
-│   ├── test_preprocessing.py
-│   ├── test_features.py
-│   └── test_inference.py
+├── assets/                         # Documentation images
+│   ├── EDA.png
+│   ├── eval.png
+│   ├── eval2.png
+│   ├── model.png
+│   └── train-curve.png
 │
-├── docker-compose.yml
-├── requirements.txt
+├── logs/                           # Execution logs
+│
+├── main.py                         # Main pipeline runner
+├── pyproject.toml                  # Project metadata
+├── uv.lock                         # Dependency lock file
+├── .env                            # Environment variables
+├── .gitignore
+├── .python-version
 └── README.md
 ```
 
@@ -213,25 +275,29 @@ Deliverable: Grafana dashboard showing live predictions and risk levels
 
 ## Dependencies
 
+Project uses `uv` for dependency management. Key dependencies:
+
 ```
-# requirements.txt
 pandas>=2.0
 numpy>=1.24
 scikit-learn>=1.3
-xgboost>=2.0
-lightgbm>=4.0
-torch>=2.0
-optuna>=3.0
+tensorflow>=2.15
 mlflow>=2.8
+boto3>=1.34
+pyarrow>=14.0
+joblib>=1.3
+matplotlib>=3.8
+seaborn>=0.13
+```
+
+For streaming (future):
+```
 fastapi>=0.104
 uvicorn>=0.24
-pydantic>=2.0
 confluent-kafka>=2.3
 redis>=5.0
 evidently>=0.4
 prometheus-client>=0.19
-pyarrow>=14.0
-joblib>=1.3
 ```
 
 ---
@@ -239,23 +305,33 @@ joblib>=1.3
 ## Environment Setup
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Start infrastructure
-docker-compose up -d kafka redis mlflow
+# Install dependencies
+uv sync
 
-# Run offline training (Stage 1)
-python src/training/train_xgboost.py --dataset FD001
+# Configure AWS credentials
+aws configure
+# OR set environment variables in .env:
+# AWS_ACCESS_KEY_ID=your_key
+# AWS_SECRET_ACCESS_KEY=your_secret
+# AWS_DEFAULT_REGION=us-east-1
 
-# Start streaming pipeline (Stage 4+)
-python src/streaming/producer.py --dataset Dataset/train_FD001.txt &
-python src/streaming/feature_consumer.py &
-
-# Start inference service (Stage 5+)
-uvicorn src.inference.app:app --reload --port 8000
+# Run the complete pipeline
+python main.py
 ```
+
+## Pipeline Execution
+
+The `main.py` orchestrates all stages:
+
+1. **Data Ingestion** - Downloads from S3
+2. **Data Validation** - Schema checks
+3. **Data Transformation** - Preprocessing & scaling
+4. **Feature Engineering** - Sequence building
+5. **Model Training** - GRU training (commented out in main.py)
+6. **Model Evaluation** - Metrics & visualization
 
 ---
 
@@ -264,10 +340,12 @@ uvicorn src.inference.app:app --reload --port 8000
 | Decision | Choice | Reason |
 |----------|--------|--------|
 | Start dataset | FD001 | Simplest: 1 condition, 1 fault mode |
-| Baseline model | XGBoost | Fast iteration, interpretable, strong baseline |
+| Model architecture | GRU (RNN) | Handles temporal sequences, lighter than LSTM |
 | RUL clip | 125 cycles | Standard in literature, focuses model on degradation window |
 | Window size | 30 cycles | Captures ~15% of average engine life; balances context vs. noise |
-| Feature store | Redis | Sub-millisecond reads, simple key-value interface |
-| Offline store | Parquet on S3 | Columnar format, cheap storage, compatible with pandas/spark |
-| Model registry | MLflow | Open source, integrates with training code, supports staging/production |
-| Normalization split | Per-condition for FD002/FD004 | Global normalization fails with 6 operating conditions |
+| Data storage | S3 (Bronze/Silver/Gold) | Medallion architecture for data lake |
+| Offline store | Parquet | Columnar format, efficient for ML workloads |
+| Model registry | MLflow | Open source, integrates with training code |
+| Normalization | MinMaxScaler | Scales to [0,1], works well with sigmoid output |
+| Loss function | MSE | Standard for regression, normalized RUL target |
+| Dependency management | uv | Fast, modern Python package manager |
