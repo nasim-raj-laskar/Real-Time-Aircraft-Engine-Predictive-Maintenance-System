@@ -1,3 +1,4 @@
+#MAIN FILE
 from src.logging.logger import logging
 from src.exception.exception import CustomException
 import sys
@@ -51,8 +52,8 @@ except Exception as e:
 STAGE_NAME = "Model Training Stage"
 try:
     logging.info(f">>>>>> Stage {STAGE_NAME} started <<<<<<")
-    # obj = ModelTrainingPipeline()
-    # obj.initiate_model_training()
+    obj = ModelTrainingPipeline()
+    obj.initiate_model_training()
     logging.info(f">>>>>> Stage {STAGE_NAME} completed <<<<<<\n")
 except Exception as e:
     logging.error(f"Error in stage {STAGE_NAME}")

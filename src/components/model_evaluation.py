@@ -55,34 +55,19 @@ class ModelEvaluation:
 
         #  RESULTS DF 
         results = pd.DataFrame({
-
             "true_rul": y_true,
             "pred_rul": preds,
-
             "error": preds - y_true,
+            "abs_error": np.abs(preds - y_true)})
 
-            "abs_error": np.abs(
-                preds - y_true
-            )
-        })
+        results.to_parquet(self.config.results_path,index=False)
 
-        results.to_parquet(
-            self.config.results_path,
-            index=False
-        )
-
-        logging.info(
-            f"Results saved at: {self.config.results_path}"
-        )
+        logging.info(f"Results saved at: {self.config.results_path}")
 
         #  CLASSIFICATION 
-        results["critical_true"] = (
-            results["true_rul"] < 30
-        )
+        results["critical_true"] = (results["true_rul"] < 30)
 
-        results["critical_pred"] = (
-            results["pred_rul"] < 30
-        )
+        results["critical_pred"] = (results["pred_rul"] < 30)
 
         cls_report = compute_classification_report(results["critical_true"], results["critical_pred"])
 
@@ -94,24 +79,15 @@ class ModelEvaluation:
 
         #  SAVE METRICS 
         metrics = {
-
             "rmse": float(rmse),
-
             "nasa_score": float(nasa),
+            "classification_report": cls_report}
 
-            "classification_report": cls_report
-        }
+        save_json(self.config.metrics_path,metrics)
 
-        save_json(
-            self.config.metrics_path,
-            metrics
-        )
+        logging.info(f"Metrics saved at: {self.config.metrics_path}")
 
-        logging.info(
-            f"Metrics saved at: {self.config.metrics_path}"
-        )
-
-        #  PLOTS 
+        #PLOTS 
         save_confusion_matrix(results["critical_true"], results["critical_pred"], self.config.confusion_matrix_path)
         save_prediction_plot(y_true, preds, rul_clip, self.config.prediction_plot_path)
         save_error_distribution(results["error"], self.config.error_distribution_path)

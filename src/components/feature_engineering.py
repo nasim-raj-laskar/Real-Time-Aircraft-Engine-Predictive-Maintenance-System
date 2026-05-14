@@ -21,6 +21,7 @@ class FeatureEngineering:
         logging.info(f"Train: {train.shape}, Test: {test.shape}")
         return train, test
 
+    #Build sequences for GRU input
     def build_sequences(self, df, feature_cols):
         X, y = [], []
 
@@ -35,6 +36,7 @@ class FeatureEngineering:
 
         return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
     
+    #Build sequences for test set (only last sequence per unit)
     def build_last_sequences(self, df, feature_cols):
         X, y = [], []
 
@@ -52,6 +54,7 @@ class FeatureEngineering:
 
         return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
         
+    #Data splitting with group awareness (units should not be split between train and val)
     def split_data(self, train_df):
         logging.info("Splitting data (Group-aware)...")
 
@@ -72,10 +75,10 @@ class FeatureEngineering:
 
         feature_cols = [col for col in train.columns if col.startswith("s")]
 
-        # ---------------- SPLIT ----------------
+        #  SPLIT 
         train_split, val_split = self.split_data(train)
 
-        # ---------------- SEQUENCES ----------------
+        #  SEQUENCES 
         logging.info("Building training sequences...")
         X_train, y_train_raw = self.build_sequences(train_split, feature_cols)
 
@@ -85,7 +88,7 @@ class FeatureEngineering:
         logging.info("Building test sequences...")
         X_test, y_test_raw = self.build_last_sequences(test, feature_cols)
 
-        # ---------------- NORMALIZATION ----------------
+        #  NORMALIZATION 
         logging.info("Normalizing targets...")
 
         y_train = (y_train_raw / self.config.rul_clip).astype(np.float32)
@@ -94,7 +97,7 @@ class FeatureEngineering:
 
         logging.info(f"Shapes → X_train: {X_train.shape}, X_val: {X_val.shape}, X_test: {X_test.shape}")
 
-        # ---------------- SAVE ----------------
+        #  SAVE 
         logging.info("Saving Gold layer tensors locally...")
         np.save(self.config.output_dir / self.config.X_train, X_train)
         np.save(self.config.output_dir / self.config.y_train, y_train)
@@ -104,7 +107,7 @@ class FeatureEngineering:
         np.save(self.config.output_dir / self.config.y_test, y_test)
         logging.info("Gold layer tensors saved")
 
-        # ---------------- SAVE METADATA ----------------
+        #  SAVE METADATA 
         from src.utils.common import save_json
 
         save_json(self.config.output_dir / "feature_config.json", {

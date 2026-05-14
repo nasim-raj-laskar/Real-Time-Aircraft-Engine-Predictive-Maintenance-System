@@ -53,14 +53,9 @@ class ModelTrainer:
         model = models.Model(inp, out)
 
         model.compile(
-            optimizer=tf.keras.optimizers.Adam(
-                learning_rate=self.config.learning_rate
-            ),
+            optimizer=tf.keras.optimizers.Adam(learning_rate=self.config.learning_rate),
             loss='mse',
-            metrics=[
-                tf.keras.metrics.RootMeanSquaredError(name='rmse')
-            ]
-        )
+            metrics=[tf.keras.metrics.RootMeanSquaredError(name='rmse')])
 
         logging.info("Model compiled successfully")
 
@@ -72,14 +67,12 @@ class ModelTrainer:
         logging.info("Creating callbacks...")
 
         callbacks = [
-
             tf.keras.callbacks.EarlyStopping(
                 monitor='val_loss',
                 patience=self.config.early_stopping_patience,
                 restore_best_weights=True,
                 verbose=1
             ),
-
             tf.keras.callbacks.ReduceLROnPlateau(
                 monitor='val_loss',
                 factor=self.config.reduce_lr_factor,
@@ -93,7 +86,7 @@ class ModelTrainer:
 
     # TRAIN 
     def train(self):
-
+        #mlflow 
         setup_mlflow()
 
         X_train, y_train, X_val, y_val = self.load_data()
@@ -103,9 +96,7 @@ class ModelTrainer:
 
         model = self.build_model(window_size, n_features)
 
-        sample_weights = (
-            1.0 + 1.5 * y_train
-        ).astype(np.float32)
+        sample_weights = (1.0 + 1.5 * y_train).astype(np.float32)
 
         logging.info("Starting model training...")
 
@@ -122,7 +113,7 @@ class ModelTrainer:
                 "window_size": window_size,
                 "n_features": n_features,
             })
-
+            #train
             history = model.fit(
                 X_train,
                 y_train,
