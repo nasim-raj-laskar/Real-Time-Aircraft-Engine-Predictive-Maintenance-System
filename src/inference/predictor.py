@@ -1,10 +1,15 @@
 import numpy as np
 from datetime import datetime, timezone
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 from src.entity.config_entity import SensorData, PredictionResponse
 
-MC_SAMPLES = 30  # number of stochastic forward passes
+MC_SAMPLES = 30
+
+
+class InferenceError(Exception):
+    pass
 
 
 def _mc_predict(model, X: np.ndarray) -> tuple[float, float]:
@@ -32,7 +37,10 @@ def run_prediction(data: SensorData, model, config: dict) -> PredictionResponse:
         )
 
     X = sensor_array.reshape(1, window_size, n_features)
-    rul_normalized, confidence = _mc_predict(model, X)
+    try:
+        rul_normalized, confidence = _mc_predict(model, X)
+    except Exception as e:
+        raise InferenceError(f"Model inference failed: {e}")
 
     rul_clip = config.get("rul_clip", 125)
     rul_pred = max(0.0, rul_normalized * rul_clip)
