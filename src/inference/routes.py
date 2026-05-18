@@ -67,4 +67,5 @@ async def model_info():
         "sensors": _config.get("features", []),
         "rul_clip": _config.get("rul_clip", 125),
         "model_version": _config.get("model_version", "unknown"),
+        "trained_on": _config.get("trained_on", "unknown"),
     }

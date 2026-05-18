@@ -2,6 +2,7 @@ import joblib
 import mlflow.tensorflow
 from mlflow.tracking import MlflowClient
 from pathlib import Path
+from datetime import datetime, timezone
 from src.utils.mlflow_setup import setup_mlflow
 from src.utils.common import load_json
 from src.config.configuration import ConfigurationManager
@@ -29,6 +30,11 @@ def load_artifacts() -> tuple:
     model = mlflow.tensorflow.load_model(model_uri)
     print(f"✓ Model loaded from MLflow registry: {model_uri} (version {model_version})")
 
+    # Pull trained_on timestamp from the MLflow run
+    run_id = versions[0].run_id
+    run = client.get_run(run_id)
+    trained_on = datetime.fromtimestamp(run.info.start_time / 1000, tz=timezone.utc).isoformat()
+
     # Load scaler from path defined in config.yaml
     scaler = joblib.load(transform_cfg.scaler_path)
     print(f"✓ Scaler loaded from {transform_cfg.scaler_path}")
@@ -46,5 +52,6 @@ def load_artifacts() -> tuple:
         }
 
     config["model_version"] = f"{model_name}_v{model_version}"
+    config["trained_on"] = trained_on
 
     return model, scaler, config
