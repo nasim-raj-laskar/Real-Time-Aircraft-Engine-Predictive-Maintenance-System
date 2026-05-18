@@ -4,6 +4,20 @@ from fastapi import HTTPException
 
 from src.entity.config_entity import SensorData, PredictionResponse
 
+MC_SAMPLES = 30  # number of stochastic forward passes
+
+
+def _mc_predict(model, X: np.ndarray) -> tuple[float, float]:
+    """Run MC Dropout inference. Returns (mean_rul_normalized, confidence)."""
+    preds = np.array(
+        [model(X, training=True).numpy()[0][0] for _ in range(MC_SAMPLES)]
+    )
+    mean = float(preds.mean())
+    std = float(preds.std())
+    # Normalize std to [0,1] range and invert to get confidence
+    confidence = float(round(max(0.0, min(1.0, 1.0 - std * 10)), 3))
+    return mean, confidence
+
 
 def run_prediction(data: SensorData, model, config: dict) -> PredictionResponse:
     sensor_array = np.array(data.sensor_data, dtype=np.float32)
@@ -17,7 +31,8 @@ def run_prediction(data: SensorData, model, config: dict) -> PredictionResponse:
             detail=f"Expected shape ({window_size}, {n_features}), got {sensor_array.shape}"
         )
 
-    rul_normalized = float(model.predict(sensor_array.reshape(1, window_size, n_features), verbose=0)[0][0])
+    X = sensor_array.reshape(1, window_size, n_features)
+    rul_normalized, confidence = _mc_predict(model, X)
 
     rul_clip = config.get("rul_clip", 125)
     rul_pred = max(0.0, rul_normalized * rul_clip)
@@ -37,7 +52,7 @@ def run_prediction(data: SensorData, model, config: dict) -> PredictionResponse:
         remaining_cycles=int(round(rul_pred)),
         failure_risk=round(risk, 3),
         risk_level=risk_level,
-        confidence=0.85,
+        confidence=confidence,
         timestamp=datetime.now(timezone.utc).isoformat(),
         model_version=config.get("model_version", "unknown"),
     )
