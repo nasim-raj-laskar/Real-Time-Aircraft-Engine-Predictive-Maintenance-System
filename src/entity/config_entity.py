@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict,List
+from typing import Dict, List
+from pydantic import BaseModel, Field
 
 @dataclass
 class DataIngestionConfig:
@@ -94,3 +95,18 @@ class ModelRegistryConfig:
     stage: str
     s3_bucket: str
     s3_artifact_prefix: str
+
+
+class SensorData(BaseModel):
+    engine_id: str
+    sensor_data: List[List[float]] = Field(..., description="30 timesteps × 11 sensor readings (normalized)")
+
+
+class PredictionResponse(BaseModel):
+    engine_id: str
+    remaining_cycles: int
+    failure_risk: float
+    risk_level: str
+    confidence: float
+    timestamp: str
+    model_version: str
