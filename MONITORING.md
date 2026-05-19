@@ -15,7 +15,7 @@ Your API automatically tracks:
 
 ### 1. Start API
 ```bash
-start_api.bat
+start.bat
 ```
 
 ### 2. Test It
@@ -136,7 +136,7 @@ docker-compose down
 ### No metrics showing?
 ```bash
 # Make sure API is running
-start_api.bat
+start.bat
 
 # Make at least one prediction
 uv run python test/test_inference.py
@@ -173,7 +173,7 @@ docker-compose up -d
 
 **For Local Development:**
 ```bash
-start_api.bat                              # Start API
+start.bat                                  # Start API
 uv run python test/test_inference.py       # Test
 http://localhost:8000/metrics              # View metrics
 ```
@@ -184,5 +184,3 @@ docker-compose up -d                       # Start
 docker logs aircraft-engine-api            # Check logs
 docker-compose down                        # Stop
 ```
-
-**That's it!** 🚀
