@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  inference-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aircraft-engine-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./artifacts:/app/artifacts:ro
+      - ./logs:/app/logs
+    environment:
+      - MODEL_PATH=/app/artifacts/model_trainer/model.keras
+      - SCALER_PATH=/app/artifacts/data_transformation/scaler.pkl
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - aircraft-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: aircraft-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aircraft-network
+
+networks:
+  aircraft-network:
+    driver: bridge
+
+volumes:
+  redis-data:
