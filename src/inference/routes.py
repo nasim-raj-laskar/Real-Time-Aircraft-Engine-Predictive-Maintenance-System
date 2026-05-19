@@ -5,6 +5,18 @@ from fastapi import APIRouter, HTTPException
 
 from src.entity.config_entity import SensorData, PredictionResponse
 from src.inference.predictor import run_prediction
+from src.inference.metrics import (
+    prediction_requests_total,
+    predicted_rul_cycles,
+    failure_risk_score,
+    critical_engines_total,
+    prediction_confidence,
+    prediction_errors_total
+)
+from src.inference.structured_logger import setup_inference_logger
+from pathlib import Path
+
+logger = setup_inference_logger('inference', Path('logs/inference.log'))
 
 router = APIRouter()
 _start_time = time.time()
@@ -26,11 +38,48 @@ def _check_ready():
 @router.post("/predict", response_model=PredictionResponse)
 async def predict(data: SensorData):
     _check_ready()
+    start_time = time.time()
+    
     try:
-        return run_prediction(data, _model, _config)
+        result = run_prediction(data, _model, _config)
+        
+        latency_ms = (time.time() - start_time) * 1000
+        
+        # Record metrics
+        prediction_requests_total.labels(
+            engine_id=data.engine_id,
+            risk_level=result.risk_level
+        ).inc()
+        
+        predicted_rul_cycles.observe(result.remaining_cycles)
+        failure_risk_score.observe(result.failure_risk)
+        prediction_confidence.observe(result.confidence)
+        
+        if result.risk_level == 'CRITICAL':
+            critical_engines_total.inc()
+        
+        # Log prediction
+        logger.info(
+            "Prediction completed",
+            extra={
+                'engine_id': data.engine_id,
+                'rul': result.remaining_cycles,
+                'risk': result.failure_risk,
+                'risk_level': result.risk_level,
+                'confidence': result.confidence,
+                'latency_ms': round(latency_ms, 2)
+            }
+        )
+        
+        return result
     except HTTPException:
         raise
     except Exception as e:
+        prediction_errors_total.labels(error_type=type(e).__name__).inc()
+        logger.error(
+            f"Prediction failed: {e}",
+            extra={'engine_id': data.engine_id}
+        )
         raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
 
 

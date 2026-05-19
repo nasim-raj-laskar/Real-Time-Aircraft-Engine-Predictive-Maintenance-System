@@ -16,8 +16,11 @@ This system demonstrates end-to-end MLOps practices for predictive maintenance:
 - ✅ **MLflow Integration** - Experiment tracking, model registry, and versioning
 - ✅ **S3 Data Lake** - Medallion architecture (Bronze/Silver/Gold layers)
 - ✅ **Model Registry** - Automated promotion with quality gates
-- 🔮 **Streaming Ready** - Designed for Kafka + Redis real-time inference
-- 🔮 **Monitoring Ready** - Prometheus + Grafana + Evidently AI
+- ✅ **FastAPI Inference** - Production-ready REST API with health checks
+- ✅ **Prometheus Metrics** - Real-time performance monitoring
+- ✅ **Drift Detection** - Evidently AI for data quality monitoring
+- ✅ **Docker Deployment** - Containerized services with docker-compose
+- 🔮 **Streaming Ready** - Designed for Kafka + Flink real-time inference
 
 ---
 
@@ -304,14 +307,18 @@ s21 - LPT coolant bleed (W32)
 - **uv** - Fast Python package manager
 - **Python 3.11** - Programming language
 
+### Inference & Monitoring (Implemented)
+- **FastAPI** - REST API for inference ✅
+- **Prometheus** - Metrics collection ✅
+- **Evidently AI** - Drift detection ✅
+- **Docker** - Containerized deployment ✅
+- **Redis** - Feature store (ready) ✅
+
 ### Future (Designed)
-- **FastAPI** - REST API for inference
-- **Kafka** - Event streaming
-- **Redis** - Feature caching
+- **Kafka/Solace** - Event streaming
+- **Apache Flink** - Stream processing
+- **Grafana** - Custom dashboards
 - **PostgreSQL** - Historical data
-- **Prometheus** - Metrics collection
-- **Grafana** - Dashboards
-- **Evidently AI** - Drift detection
 
 ---
 
@@ -373,25 +380,76 @@ s3://aircraft-engine-data/
 
 ---
 
-## 🔮 Future Features (Designed, Not Implemented)
+## 🚀 Inference & Monitoring (NEW!)
 
-### Inference Service
-- FastAPI REST API
-- `/predict` endpoint
-- Model loading from MLflow
-- Docker deployment
+### ✅ Implemented Features
+
+**FastAPI Inference Service:**
+```bash
+# Start API
+start_api.bat
+
+# Test predictions
+uv run python test/test_inference.py
+
+# Verify features
+verify_features.bat
+```
+
+**Endpoints:**
+- `POST /predict` - RUL prediction
+- `GET /health` - Health check
+- `GET /metrics` - Prometheus metrics
+- `GET /model/info` - Model metadata
+
+**Prometheus Monitoring:**
+- Request rate & latency tracking
+- ML metrics (RUL, risk, confidence)
+- Error rate monitoring
+- System health metrics
+
+**Drift Detection:**
+```bash
+# Run drift check
+run_drift_check.bat
+```
+- Evidently AI integration
+- Statistical drift detection
+- HTML report generation
+- Alert levels (OK/WARNING/CRITICAL)
+
+**Docker Deployment:**
+```bash
+# Start application stack
+docker-compose up -d
+
+# Start monitoring stack
+docker-compose -f docker-compose.monitoring.yml up -d
+```
+
+**Services:**
+- Inference API (port 8000)
+- Redis (port 6379)
+- Prometheus (port 9090)
+- Grafana (port 3000)
+
+**See [MONITORING.md](MONITORING.md) for complete guide**
+
+---
+
+## 🔮 Future Features (Designed)
 
 ### Streaming Pipeline
-- Kafka producer (telemetry simulator)
-- Kafka consumer (feature engineering)
-- Redis (feature cache)
-- PostgreSQL (historical data)
+- Solace PubSub+ / Kafka event streaming
+- Apache Flink stream processing
+- Redis online feature store
+- PostgreSQL historical data
 
-### Monitoring
-- Prometheus metrics
-- Grafana dashboards
-- Evidently drift detection
-- Alerting rules
+### Advanced Monitoring
+- Custom Grafana dashboards
+- Alert notifications (Slack/email)
+- Real-time drift monitoring
+- Model performance tracking
 
 **Documentation:** All future features are fully designed in `docs/` folder
 
