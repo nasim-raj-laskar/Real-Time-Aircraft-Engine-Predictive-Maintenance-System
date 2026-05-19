@@ -28,6 +28,11 @@ dependencies = [
     "uvicorn[standard]>=0.46.0",
     "pydantic>=2.13.4",
     "joblib>=1.5.3",
+    "prometheus-client>=0.25.0",
+    "evidently>=0.7.21",
+    "psycopg2-binary>=2.9.12",
+    "redis>=7.4.0",
+    "schedule>=1.2.2",
 ]
 
 [tool.uv]
