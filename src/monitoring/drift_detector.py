@@ -14,19 +14,13 @@ from typing import Dict
 from scipy.stats import ks_2samp
 
 
-# =====================================================
 # Logging Configuration
-# =====================================================
-
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
 
 
-# =====================================================
 # Drift Detector
-# =====================================================
-
 class DriftDetector:
     """
     Detects data drift between reference data
