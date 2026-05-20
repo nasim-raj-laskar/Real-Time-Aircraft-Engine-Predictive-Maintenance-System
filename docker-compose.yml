@@ -1,43 +1,105 @@
-version: '3.8'
-
 services:
   inference-api:
     build:
       context: .
       dockerfile: Dockerfile
+
     container_name: aircraft-engine-api
+
+    env_file:
+      - .env
+
     ports:
       - "8000:8000"
+
     volumes:
       - ./artifacts:/app/artifacts:ro
       - ./logs:/app/logs
+
     environment:
-      - MODEL_PATH=/app/artifacts/model_trainer/model.keras
-      - SCALER_PATH=/app/artifacts/data_transformation/scaler.pkl
+      MODEL_PATH: /app/artifacts/model_trainer/model.keras
+      SCALER_PATH: /app/artifacts/data_transformation/scaler.pkl
+
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+
     restart: unless-stopped
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
     networks:
       - aircraft-network
 
   redis:
     image: redis:7-alpine
+
     container_name: aircraft-redis
+
     ports:
       - "6379:6379"
+
     volumes:
       - redis-data:/data
+
     command: redis-server --appendonly yes
+
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+
     restart: unless-stopped
+
+    networks:
+      - aircraft-network
+
+  prometheus:
+    image: prom/prometheus:latest
+
+    container_name: aircraft-prometheus
+
+    ports:
+      - "9090:9090"
+
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+    restart: unless-stopped
+
+    networks:
+      - aircraft-network
+
+  grafana:
+    image: grafana/grafana:latest
+
+    container_name: aircraft-grafana
+
+    depends_on:
+      - prometheus
+
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+    ports:
+      - "3000:3000"
+
+    restart: unless-stopped
+
     networks:
       - aircraft-network
 

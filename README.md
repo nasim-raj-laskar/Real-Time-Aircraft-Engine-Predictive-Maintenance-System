@@ -420,11 +420,8 @@ run_drift_check.bat
 
 **Docker Deployment:**
 ```bash
-# Start application stack
-docker-compose up -d
-
-# Start monitoring stack
-docker-compose -f docker-compose.monitoring.yml up -d
+# Start the full application + monitoring stack
+docker compose up -d
 ```
 
 **Services:**
