@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "boto3>=1.43.2",
-    "box>=0.1.5",
     "setuptools>=70.0.0",
     "dagshub>=0.7.0",
     "protobuf>=3.20.0,<5.29.0",
