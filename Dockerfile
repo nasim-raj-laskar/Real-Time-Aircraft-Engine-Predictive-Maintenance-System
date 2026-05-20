@@ -19,6 +19,9 @@ RUN pip install --no-cache-dir uv && \
 COPY src/ ./src/
 COPY config/ ./config/
 COPY artifacts/ ./artifacts/
+COPY monitoring/ ./monitoring
+COPY reports/ ./reports
+COPY test/ ./test
 COPY app.py ./
 
 # Create logs directory

@@ -4,7 +4,7 @@ This project includes a Prometheus + Grafana monitoring stack for the inference 
 
 ## What is included
 
-- `docker-compose.monitoring.yml` - monitoring stack definition
+- `docker-compose.yml` - full application + monitoring stack definition
 - `monitoring/prometheus/prometheus.yml` - Prometheus scrape configuration
 - `monitoring/grafana/provisioning/datasources/datasource.yml` - Grafana Prometheus datasource
 - `monitoring/grafana/provisioning/dashboards/dashboard.yml` - Grafana dashboard provisioning
@@ -12,39 +12,15 @@ This project includes a Prometheus + Grafana monitoring stack for the inference 
 
 ## Start the stack
 
-1. Start the inference API separately if it is not already running:
+1. Start the full application and monitoring stack together:
 
 ```powershell
 docker compose up -d
 ```
 
-or run the API directly from Python:
+> Prometheus and Grafana are now part of the same `docker-compose.yml` network as the inference API and Redis.
 
-```powershell
-uvicorn src.inference.app:app --host 0.0.0.0 --port 8000
-```
-
-2. Start Prometheus and Grafana (on the same Docker network as the app):
-
-```powershell
-docker compose -f docker-compose.monitoring.yml up -d
-```
-
-> This stack uses the existing `aircraft-network` defined by `docker-compose.yml`, so Prometheus can scrape the running app container directly by its container name `aircraft-engine-api`.
-
-If your existing FastAPI container is not yet attached to `aircraft-network`, connect it manually:
-
-```powershell
-docker network connect aircraft-network aircraft-engine-api
-```
-
-If Redis also needs the same network, connect it too:
-
-```powershell
-docker network connect aircraft-network aircraft-redis
-```
-
-3. Open the monitoring UIs:
+2. Open the monitoring UIs:
 
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`

@@ -642,79 +642,23 @@ async def predict(data: SensorData):
 
 ## 7. Docker Compose for Monitoring Stack
 
-```yaml
-# docker-compose.monitoring.yml
-version: '3.8'
+The monitoring services are now included in the main `docker-compose.yml` file under the `prometheus` and `grafana` services.
 
-services:
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./monitoring/alerting_rules.yml:/etc/prometheus/alerting_rules.yml
-      - prometheus-data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
-
-  node-exporter:
-    image: prom/node-exporter:latest
-    ports:
-      - "9100:9100"
-    command:
-      - '--path.rootfs=/host'
-    volumes:
-      - '/:/host:ro,rslave'
-
-  kafka-exporter:
-    image: danielqsj/kafka-exporter:latest
-    ports:
-      - "9308:9308"
-    command:
-      - '--kafka.server=kafka:9092'
-
-  redis-exporter:
-    image: oliver006/redis_exporter:latest
-    ports:
-      - "9121:9121"
-    environment:
-      - REDIS_ADDR=redis:6379
-
-volumes:
-  prometheus-data:
-  grafana-data:
-```
-
----
-
-## Running the Monitoring Stack
+### Run the stack
 
 ```bash
-# Start monitoring services
-docker-compose -f docker-compose.monitoring.yml up -d
+# Start the full application and monitoring stack
+docker compose up -d
+```
 
-# Access Grafana
-open http://localhost:3000
-# Login: admin / admin
+### Access services
 
-# Access Prometheus
-open http://localhost:9090
+- Grafana: `http://localhost:3000`
+- Prometheus: `http://localhost:9090`
 
-# Start drift monitor
+### Start drift monitor
+
+```bash
 python src/monitoring/drift_monitor.py
 ```
 
