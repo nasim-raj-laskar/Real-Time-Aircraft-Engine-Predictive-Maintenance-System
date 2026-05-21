@@ -3,8 +3,9 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 
-from src.entity.config_entity import SensorData, PredictionResponse
-from src.inference.predictor import run_prediction
+from src.entity.config_entity import RawSensorData, SensorData, PredictionResponse, SingleSensorReading
+from src.inference.predictor import run_prediction, run_raw_prediction
+from src.inference.buffer import EngineBuffer, InMemoryEngineBuffer
 from src.inference.metrics import (
     prediction_requests_total,
     predicted_rul_cycles,
@@ -22,17 +23,31 @@ router = APIRouter()
 _start_time = time.time()
 
 _model = None
+_scaler = None
 _config = None
+_buffer = None
 
 
-def init_router(model, config: dict):
-    global _model, _config
-    _model, _config = model, config
+def init_router(model, scaler, config: dict):
+    global _model, _scaler, _config, _buffer
+    _model, _scaler, _config = model, scaler, config
+    # Initialize buffer for streaming events. Prefer Redis if configured.
+    window = int(config.get("window_size", 30))
+    features = list(config.get("features", []))
+    # Redis configuration may be provided in config['redis'] or via REDIS_URL env var
+    redis_cfg = config.get("redis") or {}
+    redis_url = redis_cfg.get("url") or config.get("redis_url")
+    ttl = redis_cfg.get("ttl_seconds", redis_cfg.get("ttl", 3600))
+    try:
+        _buffer = EngineBuffer(window_size=window, sensor_cols=features, redis_url=redis_url, ttl_seconds=ttl)
+    except Exception:
+        # Fall back to in-memory buffer if Redis not available
+        _buffer = InMemoryEngineBuffer(window_size=window, sensor_cols=features)
 
 
 def _check_ready():
-    if _model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+    if _model is None or _scaler is None:
+        raise HTTPException(status_code=503, detail="Inference service not fully initialized")
 
 
 @router.post("/predict", response_model=PredictionResponse)
@@ -81,6 +96,85 @@ async def predict(data: SensorData):
             extra={'engine_id': data.engine_id}
         )
         raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
+
+
+@router.post("/predict/raw", response_model=PredictionResponse)
+async def predict_raw(data: RawSensorData):
+    _check_ready()
+    start_time = time.time()
+    try:
+        result = run_raw_prediction(data, _model, _scaler, _config)
+        latency_ms = (time.time() - start_time) * 1000
+
+        prediction_requests_total.labels(
+            engine_id=data.engine_id,
+            risk_level=result.risk_level
+        ).inc()
+        predicted_rul_cycles.observe(result.remaining_cycles)
+        failure_risk_score.observe(result.failure_risk)
+        prediction_confidence.observe(result.confidence)
+
+        if result.risk_level == 'CRITICAL':
+            critical_engines_total.inc()
+
+        logger.info(
+            "Raw prediction completed",
+            extra={
+                'engine_id': data.engine_id,
+                'rul': result.remaining_cycles,
+                'risk': result.failure_risk,
+                'risk_level': result.risk_level,
+                'confidence': result.confidence,
+                'latency_ms': round(latency_ms, 2)
+            }
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        prediction_errors_total.labels(error_type=type(e).__name__).inc()
+        logger.error(
+            f"Raw prediction failed: {e}",
+            extra={'engine_id': data.engine_id}
+        )
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
+
+
+@router.post("/push")
+async def push_single(reading: SingleSensorReading):
+    """Push a single raw sensor reading into the per-engine buffer.
+
+    Body: {"engine_id": "ENG-1", "reading": {"s2":..., "s3":..., ...}}
+    """
+    _check_ready()
+    try:
+        _buffer.push(reading.engine_id, reading.reading)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"engine_id": reading.engine_id, "buffer_size": _buffer.size(reading.engine_id)}
+
+
+@router.get("/predict/stream/{engine_id}", response_model=PredictionResponse)
+async def predict_stream(engine_id: str):
+    _check_ready()
+    try:
+        window = _buffer.get_window(engine_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # reuse RawSensorData Pydantic model for validation and prediction
+    raw = RawSensorData(engine_id=engine_id, sensor_data=window)
+    try:
+        result = run_raw_prediction(raw, _model, _scaler, _config)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stream prediction failed: {e}")
+
+    return result
 
 
 @router.post("/predict/batch")

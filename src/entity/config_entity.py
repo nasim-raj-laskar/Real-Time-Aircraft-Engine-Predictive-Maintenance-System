@@ -96,10 +96,28 @@ class ModelRegistryConfig:
     s3_bucket: str
     s3_artifact_prefix: str
 
-
+#INFERENCE
 class SensorData(BaseModel):
     engine_id: str
     sensor_data: List[List[float]] = Field(..., description="30 timesteps × 11 sensor readings (normalized)")
+
+
+class RawSensorData(BaseModel):
+    engine_id: str
+    sensor_data: List[Dict[str, float]] = Field(
+        ...,
+        description=(
+            "30 timesteps of raw sensor readings. "
+            "Each timestep must include all required feature keys."
+        ),
+        min_items=30,
+        max_items=30,
+    )
+
+
+class SingleSensorReading(BaseModel):
+    engine_id: str
+    reading: Dict[str, float]
 
 
 class PredictionResponse(BaseModel):

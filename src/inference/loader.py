@@ -54,4 +54,14 @@ def load_artifacts() -> tuple:
     config["model_version"] = f"{model_name}_v{model_version}"
     config["trained_on"] = trained_on
 
+    # add runtime redis config if present
+    try:
+        cfg_mgr = ConfigurationManager()
+        redis_cfg = cfg_mgr.get_redis_config()
+        if redis_cfg:
+            config["redis"] = redis_cfg
+    except Exception:
+        # non-fatal; Redis config is optional
+        pass
+
     return model, scaler, config
