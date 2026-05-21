@@ -2,11 +2,10 @@ import numpy as np
 from datetime import datetime, timezone
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
-
-from src.entity.config_entity import SensorData, PredictionResponse
+from src.entity.config_entity import RawSensorData, SensorData, PredictionResponse
+from src.inference.preprocessor import InferencePreprocessor
 
 MC_SAMPLES = 30
-
 
 class InferenceError(Exception):
     pass
@@ -22,6 +21,48 @@ def _mc_predict(model, X: np.ndarray) -> tuple[float, float]:
     # Normalize std to [0,1] range and invert to get confidence
     confidence = float(round(max(0.0, min(1.0, 1.0 - std * 10)), 3))
     return mean, confidence
+
+
+def run_raw_prediction(data: RawSensorData, model, scaler, config: dict) -> PredictionResponse:
+    preprocessor = InferencePreprocessor(
+        scaler=scaler,
+        sensor_cols=config.get("features", []),
+        window_size=config.get("window_size", 30)
+    )
+    try:
+        normalized_window = preprocessor.build_sequence(data.sensor_data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Raw preprocessing failed: {e}")
+
+    try:
+        rul_normalized, confidence = _mc_predict(model, normalized_window)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Model inference failed: {e}")
+
+    rul_clip = config.get("rul_clip", 125)
+    rul_pred = max(0.0, rul_normalized * rul_clip)
+    risk = max(0.0, min(1.0, 1.0 - (rul_pred / rul_clip)))
+
+    if risk >= 0.8:
+        risk_level = "CRITICAL"
+    elif risk >= 0.6:
+        risk_level = "HIGH"
+    elif risk >= 0.3:
+        risk_level = "MEDIUM"
+    else:
+        risk_level = "LOW"
+
+    return PredictionResponse(
+        engine_id=data.engine_id,
+        remaining_cycles=int(round(rul_pred)),
+        failure_risk=round(risk, 3),
+        risk_level=risk_level,
+        confidence=confidence,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        model_version=config.get("model_version", "unknown"),
+    )
 
 
 def run_prediction(data: SensorData, model, config: dict) -> PredictionResponse:

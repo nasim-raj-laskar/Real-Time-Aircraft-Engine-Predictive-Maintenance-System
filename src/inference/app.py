@@ -67,7 +67,7 @@ async def startup():
     model, scaler, config = load_artifacts()
     load_time = time.time() - start_time
     model_load_time_seconds.set(load_time)
-    init_router(model, config)
+    init_router(model, scaler, config)
     print(f"✓ Model loaded in {load_time:.2f}s")
 
 
