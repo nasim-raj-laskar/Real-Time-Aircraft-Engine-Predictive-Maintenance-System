@@ -115,6 +115,11 @@ class RawSensorData(BaseModel):
     )
 
 
+class SingleSensorReading(BaseModel):
+    engine_id: str
+    reading: Dict[str, float]
+
+
 class PredictionResponse(BaseModel):
     engine_id: str
     remaining_cycles: int

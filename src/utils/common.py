@@ -2,17 +2,28 @@ import os,yaml,json
 from src.logging.logger import logging
 from src.exception.exception import CustomException
 from ensure import ensure_annotations
-from box import ConfigBox
 from pathlib import Path
 from typing import Any
 import sys
 import joblib
-from box.exceptions import BoxValueError 
+
+try:
+    from box import ConfigBox
+    from box.exceptions import BoxValueError
+except Exception:
+    try:
+        from box import Box as ConfigBox
+        class BoxValueError(Exception):
+            pass
+    except Exception:
+        ConfigBox = dict
+        class BoxValueError(Exception):
+            pass
 
 
 #read yaml
 @ensure_annotations
-def read_yaml(path_to_yaml:Path)->ConfigBox:
+def read_yaml(path_to_yaml:Path)->object:
     try:
         with open(path_to_yaml) as yaml_file:
             content=yaml.safe_load(yaml_file)
@@ -41,7 +52,7 @@ def save_json(path:Path, data:dict):
 
 #load that json
 @ensure_annotations
-def load_json(path:Path)->ConfigBox:
+def load_json(path:Path)->object:
     with open(path) as f:
         content=json.load(f)
     logging.info(f"json file loaded successfully from: {path}")

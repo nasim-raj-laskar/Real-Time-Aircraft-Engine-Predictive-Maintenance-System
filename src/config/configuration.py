@@ -16,7 +16,8 @@ class ConfigurationManager:
         models_filepath=MODELS,
         transform_filepath=TRANSFORM,
         features_filepath=FEATURES,
-        registor_filepath=REGISTOR
+        registor_filepath=REGISTOR,
+        redis_filepath=REDIS,
 ):
 
         self.config = read_yaml(config_filepath)
@@ -26,6 +27,7 @@ class ConfigurationManager:
         self.transform = read_yaml(transform_filepath)
         self.features = read_yaml(features_filepath)
         self.registor = read_yaml(registor_filepath)
+        self.redis = read_yaml(redis_filepath)
 
         create_directories([self.config.artifacts_root])
 
@@ -184,3 +186,11 @@ class ConfigurationManager:
         )
 
         return model_registry_config
+
+    def get_redis_config(self) -> dict:
+        try:
+            if self.redis:
+                return dict(self.redis.redis)
+            return {}
+        except Exception:
+            return {}

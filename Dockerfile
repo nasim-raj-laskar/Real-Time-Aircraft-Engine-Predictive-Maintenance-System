@@ -20,7 +20,8 @@ COPY pyproject.toml uv.lock ./
 
 # Install uv + dependencies
 RUN pip install --no-cache-dir uv && \
-    uv sync --frozen
+    uv sync --frozen && \
+    pip install --no-cache-dir python-box redis
 
 # Copy application code
 COPY src/ ./src/
