@@ -4,25 +4,44 @@
 
 This document describes the production streaming pipeline for the Real-Time Aircraft Engine Predictive Maintenance System. The pipeline ingests per-cycle sensor telemetry over **Solace PubSub+**, processes it statelessly-normalized and statelessly-built inside **Apache Flink**, writes inference-ready tensors to **Redis**, and archives to **S3/Parquet** — end-to-end fault-tolerant, exactly-once where semantics permit, and horizontally scalable.
 
+```mermaid
+flowchart TD
+
+    A[Aircraft Sensor Telemetry]
+
+    B[Solace PubSub+<br/>Event Broker<br/>Protocols: SMF / JMS / MQTT / REST]
+
+    C[Apache Flink<br/>Java Stateful Stream Processor]
+
+    D[NormalizationFunction<br/>Per-event Stateless Processing]
+
+    E[RollingWindowFunction<br/>Per-engine Keyed State<br/>ListState]
+
+    F[Redis<br/>Online Feature Store]
+
+    G[S3 / Parquet<br/>Offline Feature Store]
+
+    H[FastAPI Inference Service]
+
+    I[Prometheus + Grafana]
+
+    A --> B
+    B --> C
+
+    C --> D
+    C --> E
+
+    D --> F
+    E --> F
+
+    D --> G
+    E --> G
+
+    F --> H
+
+    H --> I
 ```
-Aircraft Sensor Telemetry
-         ↓
-  Solace PubSub+ (event broker)
-    Multi-protocol: SMF / JMS / MQTT / REST
-         ↓
-  Apache Flink (Java, stateful stream processor)
-    ┌─────────────────────────────┐
-    │ NormalizationFunction       │  per-event, stateless
-    │ RollingWindowFunction       │  per-engine, keyed state (ListState)
-    └─────────────────────────────┘
-       ↙                 ↘
-  Redis                S3 / Parquet
-(online feature store) (offline feature store)
-       ↓
- FastAPI Inference Service
-       ↓
-Prometheus + Grafana
-```
+
 
 ---
 
