@@ -1,5 +1,6 @@
 import time
-from typing import List
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 
@@ -26,6 +27,8 @@ _model = None
 _scaler = None
 _config = None
 _buffer = None
+# Cache of last prediction per engine_id: {engine_id: PredictionResponse}
+_last_predictions: Dict[str, dict] = {}
 
 
 def init_router(model, scaler, config: dict):
@@ -73,6 +76,12 @@ async def predict(data: SensorData):
         if result.risk_level == 'CRITICAL':
             critical_engines_total.inc()
         
+        # Cache last prediction for fleet endpoints
+        _last_predictions[data.engine_id] = {
+            **result.model_dump(),
+            "buffer_size": _buffer.size(data.engine_id) if _buffer else None,
+        }
+
         # Log prediction
         logger.info(
             "Prediction completed",
@@ -116,6 +125,12 @@ async def predict_raw(data: RawSensorData):
 
         if result.risk_level == 'CRITICAL':
             critical_engines_total.inc()
+
+        # Cache last prediction for fleet endpoints
+        _last_predictions[data.engine_id] = {
+            **result.model_dump(),
+            "buffer_size": _buffer.size(data.engine_id) if _buffer else None,
+        }
 
         logger.info(
             "Raw prediction completed",
@@ -187,6 +202,63 @@ async def predict_batch(data: List[SensorData]):
         except Exception as e:
             results.append({"engine_id": item.engine_id, "error": str(e)})
     return {"predictions": results, "total": len(results)}
+
+
+@router.get("/engines")
+async def list_engines():
+    """List all active engines and their last known prediction."""
+    _check_ready()
+    engine_ids = _buffer.list_engines() if _buffer else []
+    engines = []
+    for eid in engine_ids:
+        last = _last_predictions.get(eid)
+        engines.append({
+            "engine_id": eid,
+            "buffer_size": _buffer.size(eid),
+            "window_size": _config.get("window_size", 30),
+            "ready": _buffer.size(eid) >= _config.get("window_size", 30),
+            "last_prediction": last,
+        })
+    return {"engines": engines, "total": len(engines)}
+
+
+@router.get("/engines/{engine_id}")
+async def get_engine(engine_id: str):
+    """Get buffer status and last prediction for a specific engine."""
+    _check_ready()
+    buf_size = _buffer.size(engine_id) if _buffer else 0
+    last = _last_predictions.get(engine_id)
+    if buf_size == 0 and last is None:
+        raise HTTPException(status_code=404, detail=f"Engine '{engine_id}' not found")
+    return {
+        "engine_id": engine_id,
+        "buffer_size": buf_size,
+        "window_size": _config.get("window_size", 30),
+        "ready": buf_size >= _config.get("window_size", 30),
+        "last_prediction": last,
+    }
+
+
+@router.get("/alerts")
+async def get_alerts(min_risk_level: Optional[str] = "HIGH"):
+    """Return engines whose last prediction is at or above the given risk level.
+
+    min_risk_level: LOW | MEDIUM | HIGH | CRITICAL  (default: HIGH)
+    """
+    _check_ready()
+    rank = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+    threshold = rank.get(min_risk_level.upper(), 2)
+    alerts = [
+        pred for pred in _last_predictions.values()
+        if rank.get(pred.get("risk_level", "LOW"), 0) >= threshold
+    ]
+    alerts.sort(key=lambda x: x.get("failure_risk", 0), reverse=True)
+    return {
+        "alerts": alerts,
+        "total": len(alerts),
+        "min_risk_level": min_risk_level.upper(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.get("/health")

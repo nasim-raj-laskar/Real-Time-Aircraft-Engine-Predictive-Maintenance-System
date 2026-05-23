@@ -67,6 +67,13 @@ class EngineBuffer:
         key = self._key(engine_id)
         return int(self.client.llen(key))
 
+    def list_engines(self) -> List[str]:
+        """Return all engine IDs that currently have a buffer key in Redis."""
+        return [
+            k.split(":")[1]
+            for k in self.client.keys("engine:*:buffer")
+        ]
+
 
 class InMemoryEngineBuffer:
     """Simple thread-safe in-memory buffer used as a fallback when Redis is unavailable."""
@@ -97,3 +104,7 @@ class InMemoryEngineBuffer:
     def size(self, engine_id: str) -> int:
         with self.lock:
             return len(self.buffers.get(engine_id, []))
+
+    def list_engines(self) -> List[str]:
+        with self.lock:
+            return list(self.buffers.keys())
