@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+
+
+Dataset/
+logs/
+notebook/
+assets/
+docs/
+
+
+# Git
+.git/
+.gitignore
+
+# Env
+.env
