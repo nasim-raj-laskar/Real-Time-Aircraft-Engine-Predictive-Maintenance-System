@@ -1,11 +1,13 @@
 import time
-from typing import List
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 
 from src.entity.config_entity import RawSensorData, SensorData, PredictionResponse, SingleSensorReading
 from src.inference.predictor import run_prediction, run_raw_prediction
 from src.inference.buffer import EngineBuffer, InMemoryEngineBuffer
+from src.inference.feature_store import RedisFeatureStore
 from src.inference.metrics import (
     prediction_requests_total,
     predicted_rul_cycles,
@@ -26,23 +28,34 @@ _model = None
 _scaler = None
 _config = None
 _buffer = None
+_feature_store: Optional[RedisFeatureStore] = None
+# Cache of last prediction per engine_id: {engine_id: PredictionResponse}
+_last_predictions: Dict[str, dict] = {}
 
 
 def init_router(model, scaler, config: dict):
-    global _model, _scaler, _config, _buffer
+    global _model, _scaler, _config, _buffer, _feature_store
     _model, _scaler, _config = model, scaler, config
-    # Initialize buffer for streaming events. Prefer Redis if configured.
     window = int(config.get("window_size", 30))
     features = list(config.get("features", []))
-    # Redis configuration may be provided in config['redis'] or via REDIS_URL env var
     redis_cfg = config.get("redis") or {}
     redis_url = redis_cfg.get("url") or config.get("redis_url")
-    ttl = redis_cfg.get("ttl_seconds", redis_cfg.get("ttl", 3600))
+    ttl = int(redis_cfg.get("ttl_seconds", redis_cfg.get("ttl", 3600)))
+    # Rolling buffer (push/stream pathway)
     try:
         _buffer = EngineBuffer(window_size=window, sensor_cols=features, redis_url=redis_url, ttl_seconds=ttl)
     except Exception:
-        # Fall back to in-memory buffer if Redis not available
         _buffer = InMemoryEngineBuffer(window_size=window, sensor_cols=features)
+    # Feature store (Flink streaming pathway)
+    try:
+        _feature_store = RedisFeatureStore(
+            window_size=window,
+            n_sensors=len(features),
+            redis_url=redis_url,
+            ttl_seconds=ttl,
+        )
+    except Exception:
+        _feature_store = None
 
 
 def _check_ready():
@@ -73,6 +86,12 @@ async def predict(data: SensorData):
         if result.risk_level == 'CRITICAL':
             critical_engines_total.inc()
         
+        # Cache last prediction for fleet endpoints
+        _last_predictions[data.engine_id] = {
+            **result.model_dump(),
+            "buffer_size": _buffer.size(data.engine_id) if _buffer else None,
+        }
+
         # Log prediction
         logger.info(
             "Prediction completed",
@@ -116,6 +135,12 @@ async def predict_raw(data: RawSensorData):
 
         if result.risk_level == 'CRITICAL':
             critical_engines_total.inc()
+
+        # Cache last prediction for fleet endpoints
+        _last_predictions[data.engine_id] = {
+            **result.model_dump(),
+            "buffer_size": _buffer.size(data.engine_id) if _buffer else None,
+        }
 
         logger.info(
             "Raw prediction completed",
@@ -165,7 +190,6 @@ async def predict_stream(engine_id: str):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # reuse RawSensorData Pydantic model for validation and prediction
     raw = RawSensorData(engine_id=engine_id, sensor_data=window)
     try:
         result = run_raw_prediction(raw, _model, _scaler, _config)
@@ -173,6 +197,55 @@ async def predict_stream(engine_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Stream prediction failed: {e}")
+
+    return result
+
+
+@router.get("/predict/engine/{engine_id}", response_model=PredictionResponse)
+async def predict_from_feature_store(engine_id: str):
+    """Run inference using the feature tensor written to Redis by the Flink pipeline.
+
+    No request body needed — the (window_size, n_sensors) tensor is fetched
+    directly from the Redis feature store key `engine:{id}:features`.
+    Returns 404 if no features exist (engine not yet seen or TTL expired).
+    """
+    _check_ready()
+    if _feature_store is None:
+        raise HTTPException(status_code=503, detail="Feature store (Redis) is not available")
+
+    window = _feature_store.get_features(engine_id)
+    if window is None:
+        meta = _feature_store.get_meta(engine_id)
+        detail = (
+            f"No feature tensor found for engine '{engine_id}'. "
+            "Has telemetry been received in the last hour?"
+        )
+        raise HTTPException(status_code=404, detail=detail)
+
+    features = list(_config.get("features", []))
+    sensor_data = [
+        {features[j]: float(window[i, j]) for j in range(len(features))}
+        for i in range(window.shape[0])
+    ]
+    raw = RawSensorData(engine_id=engine_id, sensor_data=sensor_data)
+    try:
+        result = run_raw_prediction(raw, _model, _scaler, _config)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Feature store prediction failed: {e}")
+
+    # cache and record metrics
+    _last_predictions[engine_id] = {
+        **result.model_dump(),
+        "buffer_size": _buffer.size(engine_id) if _buffer else None,
+    }
+    prediction_requests_total.labels(engine_id=engine_id, risk_level=result.risk_level).inc()
+    predicted_rul_cycles.observe(result.remaining_cycles)
+    failure_risk_score.observe(result.failure_risk)
+    prediction_confidence.observe(result.confidence)
+    if result.risk_level == "CRITICAL":
+        critical_engines_total.inc()
 
     return result
 
@@ -187,6 +260,63 @@ async def predict_batch(data: List[SensorData]):
         except Exception as e:
             results.append({"engine_id": item.engine_id, "error": str(e)})
     return {"predictions": results, "total": len(results)}
+
+
+@router.get("/engines")
+async def list_engines():
+    """List all active engines and their last known prediction."""
+    _check_ready()
+    engine_ids = _buffer.list_engines() if _buffer else []
+    engines = []
+    for eid in engine_ids:
+        last = _last_predictions.get(eid)
+        engines.append({
+            "engine_id": eid,
+            "buffer_size": _buffer.size(eid),
+            "window_size": _config.get("window_size", 30),
+            "ready": _buffer.size(eid) >= _config.get("window_size", 30),
+            "last_prediction": last,
+        })
+    return {"engines": engines, "total": len(engines)}
+
+
+@router.get("/engines/{engine_id}")
+async def get_engine(engine_id: str):
+    """Get buffer status and last prediction for a specific engine."""
+    _check_ready()
+    buf_size = _buffer.size(engine_id) if _buffer else 0
+    last = _last_predictions.get(engine_id)
+    if buf_size == 0 and last is None:
+        raise HTTPException(status_code=404, detail=f"Engine '{engine_id}' not found")
+    return {
+        "engine_id": engine_id,
+        "buffer_size": buf_size,
+        "window_size": _config.get("window_size", 30),
+        "ready": buf_size >= _config.get("window_size", 30),
+        "last_prediction": last,
+    }
+
+
+@router.get("/alerts")
+async def get_alerts(min_risk_level: Optional[str] = "HIGH"):
+    """Return engines whose last prediction is at or above the given risk level.
+
+    min_risk_level: LOW | MEDIUM | HIGH | CRITICAL  (default: HIGH)
+    """
+    _check_ready()
+    rank = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+    threshold = rank.get(min_risk_level.upper(), 2)
+    alerts = [
+        pred for pred in _last_predictions.values()
+        if rank.get(pred.get("risk_level", "LOW"), 0) >= threshold
+    ]
+    alerts.sort(key=lambda x: x.get("failure_risk", 0), reverse=True)
+    return {
+        "alerts": alerts,
+        "total": len(alerts),
+        "min_risk_level": min_risk_level.upper(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.get("/health")
