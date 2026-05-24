@@ -19,6 +19,7 @@ services:
     environment:
       MODEL_PATH: /app/artifacts/model_trainer/model.keras
       SCALER_PATH: /app/artifacts/data_transformation/scaler.pkl
+      REDIS_URL: redis://redis:6379/0
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

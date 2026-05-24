@@ -26,12 +26,21 @@ from streaming.model.engine_event import SENSOR_NAMES, SENSOR_INDICES
 TOPIC_PREFIX = "aircraft/engine/"
 TOPIC_SUFFIX = "/telemetry/cycle"
 
-# Module-level queue used when no broker is configured
+# Module-level queue used when producer and consumer run in the same process
 _local_queue: queue.Queue = queue.Queue(maxsize=10_000)
+
+# Redis stream key used when running producer/consumer as separate processes
+REDIS_STREAM_KEY = "telemetry:stream"
+REDIS_STREAM_MAXLEN = 50_000
 
 
 def get_local_queue() -> queue.Queue:
     return _local_queue
+
+
+def _get_redis_client():
+    import redis
+    return redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=False)
 
 
 def _build_payload(parts: list) -> dict:
@@ -98,11 +107,15 @@ def run_producer(
 
                 if publisher:
                     _solace_publish(publisher, payload["engine_id"], raw.decode())
-                else:
+                elif target_queue is not None:
+                    # same-process mode: push to in-memory queue
                     try:
                         q.put_nowait(raw)
                     except queue.Full:
-                        q.put(raw)  # block until space — natural back-pressure
+                        q.put(raw)
+                else:
+                    # cross-process mode: push to Redis stream
+                    _redis_publish(raw)
 
                 emitted += 1
 
@@ -119,6 +132,23 @@ def run_producer(
     finally:
         if publisher:
             _solace_disconnect(publisher)
+
+
+# ── Redis stream publish ─────────────────────────────────────────────────────
+
+_redis_client = None
+
+
+def _redis_publish(raw: bytes) -> None:
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = _get_redis_client()
+    _redis_client.xadd(
+        REDIS_STREAM_KEY,
+        {"data": raw},
+        maxlen=REDIS_STREAM_MAXLEN,
+        approximate=True,
+    )
 
 
 # ── Optional Solace integration ───────────────────────────────────────────────

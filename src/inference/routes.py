@@ -39,7 +39,9 @@ def init_router(model, scaler, config: dict):
     window = int(config.get("window_size", 30))
     features = list(config.get("features", []))
     redis_cfg = config.get("redis") or {}
-    redis_url = redis_cfg.get("url") or config.get("redis_url")
+    # Prefer REDIS_URL env var (set in docker-compose), fall back to config, then localhost
+    import os
+    redis_url = os.getenv("REDIS_URL") or redis_cfg.get("url") or config.get("redis_url") or "redis://localhost:6379/0"
     ttl = int(redis_cfg.get("ttl_seconds", redis_cfg.get("ttl", 3600)))
     # Rolling buffer (push/stream pathway)
     try:
@@ -264,17 +266,21 @@ async def predict_batch(data: List[SensorData]):
 
 @router.get("/engines")
 async def list_engines():
-    """List all active engines and their last known prediction."""
+    """List all active engines — merges buffer engines and Redis feature store engines."""
     _check_ready()
-    engine_ids = _buffer.list_engines() if _buffer else []
+    # Union of buffer engines (push pathway) + Redis feature store engines (streaming pathway)
+    engine_ids = set(_buffer.list_engines() if _buffer else [])
+    if _feature_store:
+        engine_ids |= set(_feature_store.list_active_engines())
     engines = []
-    for eid in engine_ids:
+    for eid in sorted(engine_ids):
         last = _last_predictions.get(eid)
+        in_redis = _feature_store.exists(eid) if _feature_store else False
+        buf_size = _buffer.size(eid) if _buffer else 0
         engines.append({
             "engine_id": eid,
-            "buffer_size": _buffer.size(eid),
-            "window_size": _config.get("window_size", 30),
-            "ready": _buffer.size(eid) >= _config.get("window_size", 30),
+            "source": "redis_stream" if in_redis else "push_buffer",
+            "ready": in_redis or buf_size >= _config.get("window_size", 30),
             "last_prediction": last,
         })
     return {"engines": engines, "total": len(engines)}
@@ -282,17 +288,17 @@ async def list_engines():
 
 @router.get("/engines/{engine_id}")
 async def get_engine(engine_id: str):
-    """Get buffer status and last prediction for a specific engine."""
+    """Get status and last prediction for a specific engine."""
     _check_ready()
+    in_redis = _feature_store.exists(engine_id) if _feature_store else False
     buf_size = _buffer.size(engine_id) if _buffer else 0
     last = _last_predictions.get(engine_id)
-    if buf_size == 0 and last is None:
+    if not in_redis and buf_size == 0 and last is None:
         raise HTTPException(status_code=404, detail=f"Engine '{engine_id}' not found")
     return {
         "engine_id": engine_id,
-        "buffer_size": buf_size,
-        "window_size": _config.get("window_size", 30),
-        "ready": buf_size >= _config.get("window_size", 30),
+        "source": "redis_stream" if in_redis else "push_buffer",
+        "ready": in_redis or buf_size >= _config.get("window_size", 30),
         "last_prediction": last,
     }
 

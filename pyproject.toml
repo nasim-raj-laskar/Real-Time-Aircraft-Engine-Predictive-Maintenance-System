@@ -26,6 +26,7 @@ dependencies = [
     "joblib>=1.5.3",
     "prometheus-client>=0.25.0",
     "redis>=7.4.0",
+    "solace-pubsubplus>=1.11.0",
 ]
 
 [dependency-groups]
