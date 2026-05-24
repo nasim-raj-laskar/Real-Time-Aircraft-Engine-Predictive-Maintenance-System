@@ -39,7 +39,6 @@ def init_router(model, scaler, config: dict):
     window = int(config.get("window_size", 30))
     features = list(config.get("features", []))
     redis_cfg = config.get("redis") or {}
-    # Prefer REDIS_URL env var (set in docker-compose), fall back to config, then localhost
     import os
     redis_url = os.getenv("REDIS_URL") or redis_cfg.get("url") or config.get("redis_url") or "redis://localhost:6379/0"
     ttl = int(redis_cfg.get("ttl_seconds", redis_cfg.get("ttl", 3600)))
@@ -48,7 +47,7 @@ def init_router(model, scaler, config: dict):
         _buffer = EngineBuffer(window_size=window, sensor_cols=features, redis_url=redis_url, ttl_seconds=ttl)
     except Exception:
         _buffer = InMemoryEngineBuffer(window_size=window, sensor_cols=features)
-    # Feature store (Flink streaming pathway)
+    # Feature store (Flink streaming pathway) — lazy, retried on first use
     try:
         _feature_store = RedisFeatureStore(
             window_size=window,
@@ -56,8 +55,34 @@ def init_router(model, scaler, config: dict):
             redis_url=redis_url,
             ttl_seconds=ttl,
         )
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Feature store unavailable at startup (will retry on demand): {e}")
         _feature_store = None
+
+
+def _get_feature_store() -> Optional[RedisFeatureStore]:
+    """Return _feature_store, retrying connection if it failed at startup."""
+    global _feature_store
+    if _feature_store is not None:
+        return _feature_store
+    if _config is None:
+        return None
+    import os
+    redis_cfg = _config.get("redis") or {}
+    redis_url = os.getenv("REDIS_URL") or redis_cfg.get("url") or "redis://localhost:6379/0"
+    ttl = int(redis_cfg.get("ttl_seconds", redis_cfg.get("ttl", 3600)))
+    features = list(_config.get("features", []))
+    try:
+        _feature_store = RedisFeatureStore(
+            window_size=int(_config.get("window_size", 30)),
+            n_sensors=len(features),
+            redis_url=redis_url,
+            ttl_seconds=ttl,
+        )
+        logger.info("Feature store reconnected successfully")
+    except Exception as e:
+        logger.warning(f"Feature store reconnect failed: {e}")
+    return _feature_store
 
 
 def _check_ready():
@@ -212,10 +237,11 @@ async def predict_from_feature_store(engine_id: str):
     Returns 404 if no features exist (engine not yet seen or TTL expired).
     """
     _check_ready()
-    if _feature_store is None:
+    fs = _get_feature_store()
+    if fs is None:
         raise HTTPException(status_code=503, detail="Feature store (Redis) is not available")
 
-    window = _feature_store.get_features(engine_id)
+    window = fs.get_features(engine_id)
     if window is None:
         meta = _feature_store.get_meta(engine_id)
         detail = (
@@ -237,7 +263,6 @@ async def predict_from_feature_store(engine_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Feature store prediction failed: {e}")
 
-    # cache and record metrics
     _last_predictions[engine_id] = {
         **result.model_dump(),
         "buffer_size": _buffer.size(engine_id) if _buffer else None,
@@ -268,14 +293,14 @@ async def predict_batch(data: List[SensorData]):
 async def list_engines():
     """List all active engines — merges buffer engines and Redis feature store engines."""
     _check_ready()
-    # Union of buffer engines (push pathway) + Redis feature store engines (streaming pathway)
+    fs = _get_feature_store()
     engine_ids = set(_buffer.list_engines() if _buffer else [])
-    if _feature_store:
-        engine_ids |= set(_feature_store.list_active_engines())
+    if fs:
+        engine_ids |= set(fs.list_active_engines())
     engines = []
     for eid in sorted(engine_ids):
         last = _last_predictions.get(eid)
-        in_redis = _feature_store.exists(eid) if _feature_store else False
+        in_redis = fs.exists(eid) if fs else False
         buf_size = _buffer.size(eid) if _buffer else 0
         engines.append({
             "engine_id": eid,
@@ -290,7 +315,8 @@ async def list_engines():
 async def get_engine(engine_id: str):
     """Get status and last prediction for a specific engine."""
     _check_ready()
-    in_redis = _feature_store.exists(engine_id) if _feature_store else False
+    fs = _get_feature_store()
+    in_redis = fs.exists(engine_id) if fs else False
     buf_size = _buffer.size(engine_id) if _buffer else 0
     last = _last_predictions.get(engine_id)
     if not in_redis and buf_size == 0 and last is None:
@@ -301,6 +327,7 @@ async def get_engine(engine_id: str):
         "ready": in_redis or buf_size >= _config.get("window_size", 30),
         "last_prediction": last,
     }
+
 
 
 @router.get("/alerts")
