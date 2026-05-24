@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the production streaming pipeline for the Real-Time Aircraft Engine Predictive Maintenance System. The pipeline ingests per-cycle sensor telemetry over **Solace PubSub+**, processes it statelessly-normalized and statelessly-built inside **Apache Flink**, writes inference-ready tensors to **Redis**, and archives to **S3/Parquet** — end-to-end fault-tolerant, exactly-once where semantics permit, and horizontally scalable.
+This document describes the production streaming pipeline for the Real-Time Aircraft Engine Predictive Maintenance System. The pipeline ingests per-cycle sensor telemetry over **Solace PubSub+**, processes it statelessly-normalized and statelessly-built inside **Apache Flink (PyFlink)**, writes inference-ready tensors to **Redis**, and archives to **S3/Parquet** — end-to-end fault-tolerant, exactly-once where semantics permit, and horizontally scalable.
 
 ```mermaid
 flowchart TD
@@ -11,7 +11,7 @@ flowchart TD
 
     B[Solace PubSub+<br/>Event Broker<br/>Protocols: SMF / JMS / MQTT / REST]
 
-    C[Apache Flink<br/>Java Stateful Stream Processor]
+    C[Apache Flink / PyFlink<br/>Python Stateful Stream Processor]
 
     D[NormalizationFunction<br/>Per-event Stateless Processing]
 
@@ -50,17 +50,17 @@ flowchart TD
 | Component | Technology | Why |
 |-----------|------------|-----|
 | Event broker | Solace PubSub+ | Enterprise-grade, multi-protocol (SMF, JMS, MQTT, REST), hardware-accelerated routing, built-in message replay, wildcard subscriptions, no ZooKeeper dependency |
-| Stream processor | Apache Flink (Java) | Stateful keyed streams, event-time processing, exactly-once checkpoint semantics, full DataStream API access |
+| Stream processor | Apache Flink + PyFlink | Stateful keyed streams, event-time processing, exactly-once checkpoint semantics, full DataStream API access — now in Python |
 | Online feature store | Redis | Sub-millisecond reads, TTL-based expiry, atomic pipelining |
 | Offline store | Apache Parquet on S3 | Columnar, efficient batch reads for GRU retraining |
-| Serialization | Solace Schema Registry + JSON/Avro | Solace natively integrates schema management; JSON works fine at aircraft telemetry volumes |
-| Build tool | Apache Maven | Standard Java project toolchain |
+| Serialization | Solace Schema Registry + JSON | Solace natively integrates schema management; JSON works fine at aircraft telemetry volumes |
+| Build tool | `uv` / `pip` | Standard Python dependency management |
 
 ### Why Solace over Kafka?
 
 Kafka is an excellent log-based broker, but it carries real operational complexity: ZooKeeper (or KRaft), topic partition management, consumer group rebalancing lag, and the Confluent Schema Registry as a separate service. Solace PubSub+ offers a cleaner operational model for this use case:
 
-**Multi-protocol out of the box.** Aircraft avionics and ground stations speak MQTT, AMQP, or REST — not Kafka's binary protocol. Solace acts as a universal protocol gateway. A ground station can POST sensor data via REST; a flight data recorder can publish over MQTT; Flink consumes over JMS or the native SMF protocol. No middleware translation layer needed.
+**Multi-protocol out of the box.** Aircraft avionics and ground stations speak MQTT, AMQP, or REST — not Kafka's binary protocol. Solace acts as a universal protocol gateway. A ground station can POST sensor data via REST; a flight data recorder can publish over MQTT; PyFlink consumes over the Solace Python API. No middleware translation layer needed.
 
 **Hardware-accelerated routing.** The Solace appliance (and the software broker) does topic matching in hardware. Wildcard subscriptions like `aircraft/engine/+/telemetry` are resolved in nanoseconds regardless of fleet size.
 
@@ -68,7 +68,7 @@ Kafka is an excellent log-based broker, but it carries real operational complexi
 
 **No ZooKeeper.** One fewer distributed system to operate and monitor.
 
-**Flink-Solace integration.** The `flink-connector-solace` library (from Solace's official connector repo) provides a `SolaceSource` that maps directly to Flink's `Source` interface. Everything downstream of the source (keyed state, sinks, checkpoints) is identical to any other Flink pipeline.
+**Python-native integration.** The `solace-pubsubplus` Python library provides direct Solace messaging without a Java bridge. PyFlink's DataStream API exposes the same keyed-state and checkpoint semantics as the Java API, so the pipeline logic is identical — just in Python.
 
 ---
 
@@ -136,176 +136,51 @@ Flink subscribes to the wildcard `aircraft/engine/*/telemetry/cycle` via a durab
 
 ```
 streaming/
-├── pom.xml
-└── src/
-    └── main/
-        ├── resources/
-        │   ├── solace.properties           ← broker connection config
-        │   └── scaler_params.csv           ← exported MinMax scaler params
-        └── java/
-            └── com/predictivemaintenance/
-                ├── producer/
-                │   └── TelemetryProducer.java       ← Solace JCSMP producer
-                ├── pipeline/
-                │   ├── TelemetryPipeline.java       ← Flink job entry point
-                │   ├── functions/
-                │   │   ├── NormalizationFunction.java
-                │   │   └── RollingWindowFunction.java
-                │   ├── sinks/
-                │   │   ├── RedisSink.java
-                │   │   └── S3ParquetSink.java
-                │   └── source/
-                │       └── SolaceSourceFactory.java
-                └── model/
-                    ├── EngineEvent.java
-                    └── FeatureVector.java
+├── requirements.txt
+├── config/
+│   └── solace.env                  ← broker connection config (never commit secrets)
+├── resources/
+│   └── scaler_params.csv           ← exported MinMax scaler params
+├── producer/
+│   └── telemetry_producer.py       ← Solace Python producer
+├── pipeline/
+│   ├── telemetry_pipeline.py       ← PyFlink job entry point
+│   ├── functions/
+│   │   ├── normalization.py
+│   │   └── rolling_window.py
+│   ├── sinks/
+│   │   ├── redis_sink.py
+│   │   └── s3_parquet_sink.py
+│   └── source/
+│       └── solace_source.py
+└── model/
+    ├── engine_event.py
+    └── feature_vector.py
 ```
 
 ---
 
-## Maven Configuration
+## Python Dependencies
 
-```xml
-<!-- pom.xml -->
-<project>
-  <groupId>com.predictivemaintenance</groupId>
-  <artifactId>streaming-pipeline</artifactId>
-  <version>1.0.0</version>
-
-  <properties>
-    <flink.version>1.19.0</flink.version>
-    <solace.flink.version>1.1.0</solace.flink.version>
-    <solace.jcsmp.version>10.24.0</solace.jcsmp.version>
-    <jackson.version>2.16.1</jackson.version>
-    <jedis.version>5.1.0</jedis.version>
-    <java.version>17</java.version>
-  </properties>
-
-  <repositories>
-    <!-- Solace publishes connectors to their own Maven repository -->
-    <repository>
-      <id>solace-releases</id>
-      <url>https://repo.solace.com/artifactory/releases</url>
-    </repository>
-  </repositories>
-
-  <dependencies>
-    <!-- Flink core — provided: already on Flink cluster classpath -->
-    <dependency>
-      <groupId>org.apache.flink</groupId>
-      <artifactId>flink-streaming-java</artifactId>
-      <version>${flink.version}</version>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.flink</groupId>
-      <artifactId>flink-clients</artifactId>
-      <version>${flink.version}</version>
-      <scope>provided</scope>
-    </dependency>
-
-    <!-- Solace Flink connector (Source API) -->
-    <dependency>
-      <groupId>com.solace.connector.flink</groupId>
-      <artifactId>flink-connector-solace</artifactId>
-      <version>${solace.flink.version}</version>
-    </dependency>
-
-    <!-- Solace JCSMP (for producer and direct messaging) -->
-    <dependency>
-      <groupId>com.solacesystems</groupId>
-      <artifactId>sol-jcsmp</artifactId>
-      <version>${solace.jcsmp.version}</version>
-    </dependency>
-
-    <!-- JSON deserialization -->
-    <dependency>
-      <groupId>com.fasterxml.jackson.core</groupId>
-      <artifactId>jackson-databind</artifactId>
-      <version>${jackson.version}</version>
-    </dependency>
-
-    <!-- Redis client -->
-    <dependency>
-      <groupId>redis.clients</groupId>
-      <artifactId>jedis</artifactId>
-      <version>${jedis.version}</version>
-    </dependency>
-
-    <!-- Parquet + S3 sink -->
-    <dependency>
-      <groupId>org.apache.flink</groupId>
-      <artifactId>flink-parquet</artifactId>
-      <version>${flink.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.hadoop</groupId>
-      <artifactId>hadoop-client</artifactId>
-      <version>3.3.6</version>
-    </dependency>
-
-    <!-- Logging -->
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-api</artifactId>
-      <version>2.0.9</version>
-    </dependency>
-    <dependency>
-      <groupId>ch.qos.logback</groupId>
-      <artifactId>logback-classic</artifactId>
-      <version>1.4.14</version>
-    </dependency>
-  </dependencies>
-
-  <build>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-shade-plugin</artifactId>
-        <version>3.5.1</version>
-        <executions>
-          <execution>
-            <phase>package</phase>
-            <goals><goal>shade</goal></goals>
-            <configuration>
-              <shadedArtifactAttached>false</shadedArtifactAttached>
-              <filters>
-                <filter>
-                  <artifact>*:*</artifact>
-                  <excludes>
-                    <!-- Strip JAR signatures — they break when shaded -->
-                    <exclude>META-INF/*.SF</exclude>
-                    <exclude>META-INF/*.DSA</exclude>
-                    <exclude>META-INF/*.RSA</exclude>
-                  </excludes>
-                </filter>
-              </filters>
-              <transformers>
-                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                  <mainClass>com.predictivemaintenance.pipeline.TelemetryPipeline</mainClass>
-                </transformer>
-                <!-- Merge service loader files from Flink, Solace, Hadoop -->
-                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-              </transformers>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.12.1</version>
-        <configuration>
-          <source>17</source>
-          <target>17</target>
-        </configuration>
-      </plugin>
-    </plugins>
-  </build>
-</project>
+```
+# requirements.txt
+solace-pubsubplus>=1.8.0        # Solace Python messaging API
+apache-flink>=1.19.0            # PyFlink DataStream API
+redis>=5.0.0                    # Redis client
+pyarrow>=14.0.0                 # Parquet serialization
+boto3>=1.34.0                   # S3 / MinIO client
+numpy>=1.24.0                   # Tensor operations
+joblib>=1.3.0                   # Scaler deserialization
+pandas>=2.0.0                   # DataFrame utilities
 ```
 
-The `<scope>provided</scope>` on Flink core is non-negotiable. Including them in the fat JAR causes classpath conflicts with the Flink cluster's own runtime JARs. The Solace connector, Jedis, Jackson, and Parquet libraries must be in the fat JAR — they are not on the Flink classpath by default.
+Install:
+
+```bash
+uv pip install -r streaming/requirements.txt
+# or
+pip install -r streaming/requirements.txt
+```
 
 ---
 
@@ -321,7 +196,7 @@ solace:
   image: solace/solace-pubsub-standard:latest
   ports:
     - "8080:8080"    # Management UI (Solace Manager)
-    - "55555:55555"  # SMF (Solace Message Format) — used by JCSMP/Flink connector
+    - "55555:55555"  # SMF (Solace Message Format) — used by Python API / Flink connector
     - "8008:8008"    # SMF over WebSocket
     - "1883:1883"    # MQTT
     - "5672:5672"    # AMQP 1.0
@@ -353,8 +228,6 @@ BASE="http://localhost:8080/SEMP/v2/config/msgVpns/default"
 AUTH="-u admin:admin"
 
 # Create a durable, partitioned queue for Flink to consume from
-# Partitioned = messages with the same partition key (engine_id) always
-# go to the same Flink consumer subtask, preserving per-engine ordering
 curl -s -X POST $BASE/queues $AUTH \
   -H "Content-Type: application/json" \
   -d '{
@@ -371,7 +244,6 @@ curl -s -X POST $BASE/queues $AUTH \
   }'
 
 # Bind a wildcard subscription to the queue
-# All engine telemetry topics → this queue
 curl -s -X POST $BASE/queues/flink.feature.processor/subscriptions $AUTH \
   -H "Content-Type: application/json" \
   -d '{
@@ -397,457 +269,224 @@ curl -s -X POST $BASE/queues/monitoring.telemetry.fanout/subscriptions $AUTH \
 echo "Queue provisioning complete."
 ```
 
-**Why a partitioned queue?** When Flink has multiple parallel source subtasks (say, parallelism 8), each subtask binds to the same queue. Without partitioning, Solace distributes messages round-robin — engine ENG-042's cycle 100 might go to subtask-3 while cycle 101 goes to subtask-6. `RollingWindowFunction`'s `ListState` is keyed by `engine_id`, so the same engine always lands on the same Flink parallel instance via `keyBy()`. But if cycles arrive out-of-order at the source level, the stateful `lastCycleState` guard in `RollingWindowFunction` catches and drops them. Partitioned queues prevent this before it reaches Flink.
+**Why a partitioned queue?** When Flink has multiple parallel source subtasks (say, parallelism 8), each subtask binds to the same queue. Without partitioning, Solace distributes messages round-robin — engine ENG-042's cycle 100 might go to subtask-3 while cycle 101 goes to subtask-6. PyFlink's `keyBy()` guarantees per-engine routing downstream, and the `last_cycle` guard in `RollingWindowFunction` catches and drops out-of-order arrivals. Partitioned queues prevent this at the broker level before it reaches Flink.
 
 ---
 
 ## Solace Connection Configuration
 
-```properties
-# src/main/resources/solace.properties
-solace.host=tcp://localhost:55555
-solace.vpn=default
-solace.username=admin
-solace.password=admin
+```bash
+# config/solace.env  — load with python-dotenv or os.environ
+SOLACE_HOST=tcp://localhost:55555
+SOLACE_VPN=default
+SOLACE_USERNAME=admin
+SOLACE_PASSWORD=admin
 
 # For production (TLS):
-# solace.host=tcps://solace-prod.internal:55443
-# solace.ssl.trust-store=/opt/certs/truststore.jks
-# solace.ssl.trust-store-password=changeit
+# SOLACE_HOST=tcps://solace-prod.internal:55443
 
 # Queue name the Flink source binds to
-solace.queue.name=flink.feature.processor
+SOLACE_QUEUE_NAME=flink.feature.processor
 
-# Replay: set to "BEGINNING" to replay all spooled messages on restart
-# Set to "DATE:2024-01-15T00:00:00Z" for point-in-time replay
-# Set to "LATEST" to consume only new messages
-solace.replay.start=LATEST
+# Replay: BEGINNING | LATEST | DATE:2024-01-15T00:00:00Z
+SOLACE_REPLAY_START=LATEST
 ```
 
-Load this in Java via `Properties` — never hardcode credentials. In production, pull from AWS Secrets Manager or HashiCorp Vault.
+Load credentials from environment variables — never hardcode them. In production, pull from AWS Secrets Manager or HashiCorp Vault.
 
 ---
 
-## Telemetry Producer (Simulator)
+## Data Model — Python Dataclasses
 
-The producer replays C-MAPSS data into Solace using the JCSMP API, simulating real aircraft telemetry. In production, this is replaced by actual avionics feeds.
+```python
+# streaming/model/engine_event.py
+from dataclasses import dataclass, field
+from typing import Dict
+import json
 
-```java
-// src/main/java/com/predictivemaintenance/producer/TelemetryProducer.java
-package com.predictivemaintenance.producer;
+SENSOR_NAMES = ["s2", "s3", "s4", "s7", "s9", "s11", "s12", "s14", "s17", "s20", "s21"]
 
-import com.solacesystems.jcsmp.*;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.nio.file.*;
-import java.time.Instant;
-import java.util.*;
+@dataclass
+class EngineEvent:
+    engine_id:    str
+    cycle:        int
+    event_time_ms: int
+    sensors:      Dict[str, float] = field(default_factory=dict)
 
-public class TelemetryProducer {
+    @classmethod
+    def from_json(cls, raw: bytes) -> "EngineEvent":
+        data = json.loads(raw)
+        return cls(
+            engine_id=data["engine_id"],
+            cycle=data["cycle"],
+            event_time_ms=data["event_time_ms"],
+            sensors=data["sensors"],
+        )
 
-    // Sensor column indices in the raw FD001 file (0-indexed)
-    private static final int[] SENSOR_INDICES = {6, 7, 8, 11, 13, 15, 16, 18, 21, 24, 25};
-    private static final String[] SENSOR_NAMES = {"s2","s3","s4","s7","s9","s11","s12","s14","s17","s20","s21"};
-    private static final String TOPIC_PREFIX = "aircraft/engine/";
-    private static final String TOPIC_SUFFIX = "/telemetry/cycle";
+    def sensor_array(self) -> list[float]:
+        """Return sensors in canonical order for model input."""
+        return [self.sensors.get(s, 0.0) for s in SENSOR_NAMES]
+```
 
-    public static void main(String[] args) throws Exception {
-        // JCSMP session properties
-        JCSMPProperties props = new JCSMPProperties();
-        props.setProperty(JCSMPProperties.HOST,      "tcp://localhost:55555");
-        props.setProperty(JCSMPProperties.VPN_NAME,  "default");
-        props.setProperty(JCSMPProperties.USERNAME,  "admin");
-        props.setProperty(JCSMPProperties.PASSWORD,  "admin");
+```python
+# streaming/model/feature_vector.py
+from dataclasses import dataclass
+import struct
+import numpy as np
 
-        // Windowed acknowledgement: producer waits for broker ACK before
-        // considering a message sent — equivalent to Kafka's acks=all
-        props.setProperty(JCSMPProperties.PUB_ACK_WINDOW_SIZE, 50);
+@dataclass
+class FeatureVector:
+    engine_id:   str
+    cycle:       int
+    event_time:  int
+    features:    list[float]   # flattened (window_size * n_sensors,)
+    window_size: int
+    n_sensors:   int
 
-        JCSMPSession session = JCSMPFactory.onlyInstance().createSession(props);
-        session.connect();
+    def to_numpy(self) -> np.ndarray:
+        """Reshape back to (window_size, n_sensors) for model input."""
+        return np.array(self.features, dtype=np.float32).reshape(self.window_size, self.n_sensors)
 
-        // XMLMessageProducer with async ACK handler
-        XMLMessageProducer producer = session.getMessageProducer(new JCSMPStreamingPublishCorrelatingEventHandler() {
-            @Override
-            public void responseReceivedEx(Object correlationKey) {
-                // Message confirmed by broker — nothing to do for simulation
-            }
-            @Override
-            public void handleErrorEx(Object correlationKey, JCSMPException ex, long timestamp) {
-                System.err.printf("[%d] Publish failed for %s: %s%n",
-                    timestamp, correlationKey, ex.getMessage());
-                // In production: write to dead-letter queue or circuit-break
-            }
-        });
+    def to_bytes(self) -> bytes:
+        """Serialize as big-endian IEEE 754 floats — matches struct.unpack('>Nf') in inference."""
+        return struct.pack(f">{len(self.features)}f", *self.features)
 
-        ObjectMapper mapper = new ObjectMapper();
-        List<String> lines = Files.readAllLines(Path.of("Dataset/train_FD001.txt"));
-        int emitted = 0;
+    @property
+    def redis_feature_key(self) -> str:
+        return f"engine:{self.engine_id}:features"
 
-        for (String line : lines) {
-            String[] parts = line.trim().split("\\s+");
-            if (parts.length < 26) continue;
+    @property
+    def redis_meta_key(self) -> str:
+        return f"engine:{self.engine_id}:meta"
+```
 
-            String engineId = "ENG-" + parts[0];
-            int    cycle    = Integer.parseInt(parts[1]);
+---
 
-            // Build JSON payload
-            ObjectNode payload = mapper.createObjectNode();
-            payload.put("engine_id",     engineId);
-            payload.put("cycle",         cycle);
-            payload.put("event_time_ms", Instant.now().toEpochMilli());
+## Telemetry Producer (Python Simulator)
 
-            ObjectNode sensors = payload.putObject("sensors");
-            for (int i = 0; i < SENSOR_INDICES.length; i++) {
-                sensors.put(SENSOR_NAMES[i], Float.parseFloat(parts[SENSOR_INDICES[i]]));
-            }
+The producer replays C-MAPSS data into Solace using the `solace-pubsubplus` Python library, simulating real aircraft telemetry. In production this is replaced by actual avionics feeds.
 
-            // Create Solace text message
-            TextMessage msg = JCSMPFactory.onlyInstance().createMessage(TextMessage.class);
-            msg.setText(mapper.writeValueAsString(payload));
+```python
+# streaming/producer/telemetry_producer.py
+import os, json, time
+from pathlib import Path
+from datetime import datetime, timezone
 
-            // Partition key = engine ID → guarantees per-engine ordering on partitioned queue
-            msg.setHTTPContentType("application/json");
-            SDTMap userProps = JCSMPFactory.onlyInstance().createMap();
-            userProps.putString("engine_id", engineId);
-            userProps.putInteger("cycle", cycle);
-            msg.setProperties(userProps);
+from solace.messaging.messaging_service import MessagingService
+from solace.messaging.resources.topic import Topic
+from solace.messaging.config.solace_properties import (
+    transport_layer_properties as TL,
+    service_properties as SP,
+    authentication_properties as AUTH,
+)
 
-            // Correlation tag for async ACK tracking
-            msg.setCorrelationKey(engineId + ":" + cycle);
+from streaming.model.engine_event import SENSOR_NAMES
 
-            // Publish to the per-engine topic
-            // Solace routes this to all queues with matching subscriptions
-            Topic topic = JCSMPFactory.onlyInstance().createTopic(
-                TOPIC_PREFIX + engineId + TOPIC_SUFFIX
-            );
-            producer.send(msg, topic);
+# ── Sensor column indices in the raw FD001 file (0-indexed) ──────────────────
+SENSOR_INDICES = [6, 7, 8, 11, 13, 15, 16, 18, 21, 24, 25]
+TOPIC_PREFIX   = "aircraft/engine/"
+TOPIC_SUFFIX   = "/telemetry/cycle"
 
-            emitted++;
 
-            // Throttle to simulate ~10 cycles/sec per engine (100 engines → 1000 events/sec)
-            if (emitted % 1000 == 0) {
-                Thread.sleep(1000);
-                System.out.printf("Emitted %d events%n", emitted);
-            }
+def build_messaging_service() -> MessagingService:
+    broker_props = {
+        TL.HOST:      os.environ.get("SOLACE_HOST",     "tcp://localhost:55555"),
+        SP.VPN_NAME:  os.environ.get("SOLACE_VPN",      "default"),
+        AUTH.SCHEME_BASIC_USER_NAME: os.environ.get("SOLACE_USERNAME", "admin"),
+        AUTH.SCHEME_BASIC_PASSWORD:  os.environ.get("SOLACE_PASSWORD", "admin"),
+    }
+    return MessagingService.builder().from_properties(broker_props).build()
+
+
+def run_producer(dataset_path: str = "Dataset/train_FD001.txt", throttle_ms: int = 1) -> None:
+    """
+    Replay C-MAPSS rows into Solace, one event per cycle row.
+
+    Args:
+        dataset_path: Path to the raw FD001 training file.
+        throttle_ms:  Milliseconds to sleep between publishes (set 0 for max throughput).
+    """
+    service = build_messaging_service()
+    service.connect()
+
+    publisher = service.create_persistent_message_publisher_builder().build()
+    publisher.start()
+
+    lines   = Path(dataset_path).read_text().splitlines()
+    emitted = 0
+
+    print(f"[producer] Starting replay of {len(lines)} cycles → Solace")
+
+    for line in lines:
+        parts = line.strip().split()
+        if len(parts) < 26:
+            continue
+
+        engine_id = f"ENG-{parts[0]}"
+        cycle     = int(parts[1])
+        now_ms    = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        payload = {
+            "engine_id":    engine_id,
+            "cycle":        cycle,
+            "event_time_ms": now_ms,
+            "sensors": {
+                name: float(parts[idx])
+                for name, idx in zip(SENSOR_NAMES, SENSOR_INDICES)
+            },
         }
 
-        // Drain the ACK window before closing
-        Thread.sleep(2000);
-        session.closeSession();
-        System.out.printf("Done. Emitted %d total events.%n", emitted);
-    }
-}
+        topic   = Topic.of(TOPIC_PREFIX + engine_id + TOPIC_SUFFIX)
+        message = (
+            service.message_builder()
+            .with_application_message_id(f"{engine_id}:{cycle}")
+            .with_property("engine_id", engine_id)
+            .with_property("cycle",     str(cycle))
+            .build(json.dumps(payload))
+        )
+
+        publisher.publish(message, topic)
+        emitted += 1
+
+        if throttle_ms > 0:
+            time.sleep(throttle_ms / 1000)
+
+        if emitted % 1_000 == 0:
+            print(f"[producer] Emitted {emitted} events")
+
+    # Drain the ACK window before closing
+    publisher.terminate(grace_period=2000)
+    service.disconnect()
+    print(f"[producer] Done. Emitted {emitted} total events.")
+
+
+if __name__ == "__main__":
+    import dotenv
+    dotenv.load_dotenv("config/solace.env")
+    run_producer()
 ```
 
 **Key design points:**
 
-The `PUB_ACK_WINDOW_SIZE` of 50 means the producer can have up to 50 unacknowledged messages in flight at once. The broker ACKs each message once it's spooled to the queue. This gives you high throughput without losing messages on retry — equivalent to Kafka's idempotent producer with `acks=all`.
-
-Publishing to per-engine topics (`aircraft/engine/ENG-042/telemetry/cycle`) rather than a single flat topic gives Solace's router enough information to apply Quality of Service rules per-engine in the future — throttle low-priority engines, priority-route critical ones.
-
----
-
-## Solace Source Factory
-
-```java
-// src/main/java/com/predictivemaintenance/pipeline/source/SolaceSourceFactory.java
-package com.predictivemaintenance.pipeline.source;
-
-import com.solace.connector.flink.SolaceSource;
-import com.solace.connector.flink.SolaceSourceConfiguration;
-import com.solace.connector.flink.SolaceSourceBuilder;
-import com.solacesystems.jcsmp.JCSMPProperties;
-import com.predictivemaintenance.model.EngineEvent;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.flink.api.common.serialization.DeserializationSchema;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-
-public class SolaceSourceFactory {
-
-    public static SolaceSource<EngineEvent> build(String host, String vpn,
-                                                   String user, String pass,
-                                                   String queueName) {
-        JCSMPProperties sessionProps = new JCSMPProperties();
-        sessionProps.setProperty(JCSMPProperties.HOST,     host);
-        sessionProps.setProperty(JCSMPProperties.VPN_NAME, vpn);
-        sessionProps.setProperty(JCSMPProperties.USERNAME, user);
-        sessionProps.setProperty(JCSMPProperties.PASSWORD, pass);
-
-        return SolaceSource.<EngineEvent>builder()
-            .setSessionProperties(sessionProps)
-            .setQueueName(queueName)
-            .setDeserializationSchema(new EngineEventDeserializer())
-            // Flink commits ACKs to Solace on checkpoint completion.
-            // Messages are re-delivered if the job fails before a checkpoint.
-            // This gives at-least-once from Solace's perspective; exactly-once
-            // is achieved by Flink's idempotent state (the lastCycleState guard).
-            .setAckMode(SolaceSourceConfiguration.AckMode.ON_CHECKPOINT)
-            .build();
-    }
-
-    /** Deserializes a Solace TextMessage (JSON) into an EngineEvent POJO. */
-    public static class EngineEventDeserializer
-            implements DeserializationSchema<EngineEvent> {
-
-        private static final ObjectMapper MAPPER = new ObjectMapper();
-
-        @Override
-        public EngineEvent deserialize(byte[] message) throws Exception {
-            return MAPPER.readValue(message, EngineEvent.class);
-        }
-
-        @Override
-        public boolean isEndOfStream(EngineEvent event) {
-            return false; // unbounded stream
-        }
-
-        @Override
-        public TypeInformation<EngineEvent> getProducedType() {
-            return TypeInformation.of(EngineEvent.class);
-        }
-    }
-}
-```
-
----
-
-## EngineEvent POJO
-
-```java
-// src/main/java/com/predictivemaintenance/model/EngineEvent.java
-package com.predictivemaintenance.model;
-
-import com.fasterxml.jackson.annotation.JsonProperty;
-import java.io.Serializable;
-
-public class EngineEvent implements Serializable {
-
-    @JsonProperty("engine_id")   private String engineId;
-    @JsonProperty("cycle")       private int    cycle;
-    @JsonProperty("event_time_ms") private long eventTimeMs;
-
-    // Jackson maps the nested "sensors" object into these fields
-    @JsonProperty("sensors")
-    private void unpackSensors(java.util.Map<String, Float> sensors) {
-        this.s2  = sensors.getOrDefault("s2",  0f);
-        this.s3  = sensors.getOrDefault("s3",  0f);
-        this.s4  = sensors.getOrDefault("s4",  0f);
-        this.s7  = sensors.getOrDefault("s7",  0f);
-        this.s9  = sensors.getOrDefault("s9",  0f);
-        this.s11 = sensors.getOrDefault("s11", 0f);
-        this.s12 = sensors.getOrDefault("s12", 0f);
-        this.s14 = sensors.getOrDefault("s14", 0f);
-        this.s17 = sensors.getOrDefault("s17", 0f);
-        this.s20 = sensors.getOrDefault("s20", 0f);
-        this.s21 = sensors.getOrDefault("s21", 0f);
-    }
-
-    private float s2, s3, s4, s7, s9, s11, s12, s14, s17, s20, s21;
-
-    // No-arg constructor required by Jackson and Flink serializer
-    public EngineEvent() {}
-
-    public String getEngineId()    { return engineId; }
-    public int    getCycle()       { return cycle; }
-    public long   getEventTimeMs() { return eventTimeMs; }
-    public float  getS2()          { return s2; }
-    public float  getS3()          { return s3; }
-    public float  getS4()          { return s4; }
-    public float  getS7()          { return s7; }
-    public float  getS9()          { return s9; }
-    public float  getS11()         { return s11; }
-    public float  getS12()         { return s12; }
-    public float  getS14()         { return s14; }
-    public float  getS17()         { return s17; }
-    public float  getS20()         { return s20; }
-    public float  getS21()         { return s21; }
-
-    // Setters required by Flink's POJO serializer
-    public void setEngineId(String v)    { engineId = v; }
-    public void setCycle(int v)          { cycle = v; }
-    public void setEventTimeMs(long v)   { eventTimeMs = v; }
-    public void setS2(float v)           { s2 = v; }
-    public void setS3(float v)           { s3 = v; }
-    public void setS4(float v)           { s4 = v; }
-    public void setS7(float v)           { s7 = v; }
-    public void setS9(float v)           { s9 = v; }
-    public void setS11(float v)          { s11 = v; }
-    public void setS12(float v)          { s12 = v; }
-    public void setS14(float v)          { s14 = v; }
-    public void setS17(float v)          { s17 = v; }
-    public void setS20(float v)          { s20 = v; }
-    public void setS21(float v)          { s21 = v; }
-}
-```
-
----
-
-## Flink Pipeline — Entry Point
-
-```java
-// src/main/java/com/predictivemaintenance/pipeline/TelemetryPipeline.java
-package com.predictivemaintenance.pipeline;
-
-import org.apache.flink.api.common.eventtime.*;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import com.predictivemaintenance.model.EngineEvent;
-import com.predictivemaintenance.model.FeatureVector;
-import com.predictivemaintenance.pipeline.functions.*;
-import com.predictivemaintenance.pipeline.sinks.*;
-import com.predictivemaintenance.pipeline.source.SolaceSourceFactory;
-import java.time.Duration;
-
-public class TelemetryPipeline {
-
-    public static void main(String[] args) throws Exception {
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-
-        // ── Checkpointing ──────────────────────────────────────────────────────
-        // Flink checkpoints save all managed state (ListState, ValueState) and
-        // Solace consumer offsets to S3. On failure, Flink restores from the
-        // last completed checkpoint and Solace re-delivers uncommitted messages.
-        env.enableCheckpointing(30_000);  // every 30 seconds
-        env.getCheckpointConfig()
-           .setCheckpointStorage("s3://aircraft-engine-data/flink-checkpoints/");
-        env.getCheckpointConfig().setMinPauseBetweenCheckpoints(10_000);
-        env.getCheckpointConfig().setTolerableCheckpointFailureNumber(2);
-
-        // ── Parallelism ─────────────────────────────────────────────────────────
-        // Match Solace queue partition count (8). Each Flink source subtask
-        // consumes from one Solace queue consumer session.
-        env.setParallelism(8);
-
-        // ── Source: Solace PubSub+ ──────────────────────────────────────────────
-        var solaceSource = SolaceSourceFactory.build(
-            "tcp://localhost:55555", "default", "admin", "admin",
-            "flink.feature.processor"
-        );
-
-        // ── Watermark Strategy ─────────────────────────────────────────────────
-        // Bounded out-of-orderness: tolerate up to 5 seconds of late events.
-        // withIdleness: if a Solace consumer session has no messages for 60s,
-        // exclude it from global watermark calculation (prevents stalling).
-        WatermarkStrategy<EngineEvent> watermarkStrategy =
-            WatermarkStrategy.<EngineEvent>forBoundedOutOfOrderness(Duration.ofSeconds(5))
-                .withTimestampAssigner((event, _) -> event.getEventTimeMs())
-                .withIdleness(Duration.ofSeconds(60));
-
-        DataStream<EngineEvent> rawStream = env
-            .fromSource(solaceSource, watermarkStrategy, "Solace Telemetry Source")
-            .name("solace-telemetry-source");
-
-        // ── Register scaler params with Flink distributed cache ─────────────────
-        // Flink ships this file to every TaskManager before the job starts.
-        // NormalizationFunction reads it in open() — no file system access per event.
-        env.registerCachedFile(
-            "src/main/resources/scaler_params.csv", "scaler-params"
-        );
-
-        // ── Stage 1: Normalization (stateless) ─────────────────────────────────
-        DataStream<EngineEvent> normalizedStream = rawStream
-            .map(new NormalizationFunction())
-            .name("minmax-normalization");
-
-        // ── Stage 2: Rolling Window Feature Builder (stateful, keyed) ──────────
-        // keyBy() guarantees all events for the same engine_id go to the same
-        // parallel subtask. RollingWindowFunction maintains per-engine ListState.
-        DataStream<FeatureVector> featureStream = normalizedStream
-            .keyBy(EngineEvent::getEngineId)
-            .process(new RollingWindowFunction(30))
-            .name("rolling-window-feature-builder");
-
-        // ── Sink 1: Redis (online feature store, low-latency inference) ─────────
-        featureStream
-            .addSink(new RedisSink("localhost", 6379))
-            .name("redis-online-feature-sink");
-
-        // ── Sink 2: S3 Parquet (offline store, periodic GRU retraining) ─────────
-        featureStream
-            .sinkTo(S3ParquetSink.build("s3://aircraft-engine-data/features/"))
-            .name("s3-parquet-offline-sink");
-
-        env.execute("Aircraft Telemetry Feature Pipeline v2 (Solace)");
-    }
-}
-```
+Publishing to per-engine topics (`aircraft/engine/ENG-042/telemetry/cycle`) rather than a single flat topic gives Solace's router enough information to apply Quality of Service rules per-engine in the future — throttle low-priority engines, priority-route critical ones. The persistent publisher waits for broker ACKs before advancing the window, equivalent to Kafka's `acks=all`.
 
 ---
 
 ## Normalization Function
 
-Sensor values arrive raw from the broker. The MinMaxScaler fitted on FD001 training data must be applied per-event before the rolling window is built.
+Sensor values arrive raw from the broker. The `MinMaxScaler` fitted on FD001 training data must be applied per-event before the rolling window is built.
 
-```java
-// src/main/java/com/predictivemaintenance/pipeline/functions/NormalizationFunction.java
-package com.predictivemaintenance.pipeline.functions;
-
-import org.apache.flink.api.common.functions.RichMapFunction;
-import org.apache.flink.configuration.Configuration;
-import com.predictivemaintenance.model.EngineEvent;
-import java.io.*;
-import java.nio.file.*;
-import java.util.List;
-
-public class NormalizationFunction extends RichMapFunction<EngineEvent, EngineEvent> {
-
-    private float[] sensorMin;
-    private float[] sensorMax;
-
-    @Override
-    public void open(Configuration params) throws Exception {
-        // Distributed cache delivers the file to this TaskManager's local disk
-        File f = getRuntimeContext().getDistributedCache().getFile("scaler-params");
-        List<String> lines = Files.readAllLines(f.toPath());
-        // scaler_params.csv format: row 0 = min values, row 1 = max values
-        // comma-separated, one value per sensor in order: s2,s3,s4,s7,s9,s11,s12,s14,s17,s20,s21
-        String[] mins = lines.get(0).split(",");
-        String[] maxs = lines.get(1).split(",");
-        sensorMin = new float[mins.length];
-        sensorMax = new float[maxs.length];
-        for (int i = 0; i < mins.length; i++) {
-            sensorMin[i] = Float.parseFloat(mins[i].trim());
-            sensorMax[i] = Float.parseFloat(maxs[i].trim());
-        }
-    }
-
-    @Override
-    public EngineEvent map(EngineEvent e) {
-        e.setS2(norm(e.getS2(),   0));
-        e.setS3(norm(e.getS3(),   1));
-        e.setS4(norm(e.getS4(),   2));
-        e.setS7(norm(e.getS7(),   3));
-        e.setS9(norm(e.getS9(),   4));
-        e.setS11(norm(e.getS11(), 5));
-        e.setS12(norm(e.getS12(), 6));
-        e.setS14(norm(e.getS14(), 7));
-        e.setS17(norm(e.getS17(), 8));
-        e.setS20(norm(e.getS20(), 9));
-        e.setS21(norm(e.getS21(), 10));
-        return e;
-    }
-
-    private float norm(float value, int i) {
-        float range = sensorMax[i] - sensorMin[i];
-        if (range == 0f) return 0f;
-        return Math.max(0f, Math.min(1f, (value - sensorMin[i]) / range));
-    }
-}
-```
-
-**Exporting scaler parameters from Python:**
+**Exporting scaler parameters from training artifacts:**
 
 ```python
 # scripts/export_scaler_params.py
-import joblib, numpy as np
+import joblib
 
 scaler = joblib.load("artifacts/data_transformation/scaler.pkl")
 mins = ",".join(f"{v:.8f}" for v in scaler.data_min_)
 maxs = ",".join(f"{v:.8f}" for v in scaler.data_max_)
 
-with open("streaming/src/main/resources/scaler_params.csv", "w") as f:
+with open("streaming/resources/scaler_params.csv", "w") as f:
     f.write(mins + "\n")
     f.write(maxs + "\n")
 
@@ -856,281 +495,300 @@ print(f"Exported {len(scaler.data_min_)} sensor min/max values.")
 
 Run this after every model training run that produces a new scaler. The values are stable across training runs on the same dataset but will differ if you add sensors or change the feature set.
 
+```python
+# streaming/pipeline/functions/normalization.py
+import csv
+from pathlib import Path
+import numpy as np
+
+from streaming.model.engine_event import EngineEvent, SENSOR_NAMES
+
+
+class NormalizationFunction:
+    """
+    Stateless MinMax normalization applied per EngineEvent.
+
+    Reads scaler_params.csv once at construction — no file I/O per event.
+    Thread-safe: arrays are read-only after __init__.
+    """
+
+    def __init__(self, scaler_params_path: str = "streaming/resources/scaler_params.csv"):
+        rows = Path(scaler_params_path).read_text().strip().splitlines()
+        self.sensor_min = np.array([float(v) for v in rows[0].split(",")], dtype=np.float32)
+        self.sensor_max = np.array([float(v) for v in rows[1].split(",")], dtype=np.float32)
+        self._range = np.where(
+            self.sensor_max - self.sensor_min == 0,
+            1.0,                                    # avoid division by zero for constant sensors
+            self.sensor_max - self.sensor_min,
+        )
+
+    def normalize(self, event: EngineEvent) -> EngineEvent:
+        """
+        Normalize all 11 sensor readings in-place and return the event.
+        Clamps output to [0, 1].
+        """
+        raw = np.array(event.sensor_array(), dtype=np.float32)
+        normed = np.clip((raw - self.sensor_min) / self._range, 0.0, 1.0)
+
+        for i, name in enumerate(SENSOR_NAMES):
+            event.sensors[name] = float(normed[i])
+
+        return event
+```
+
 ---
 
 ## Rolling Window Function — Core of the Pipeline
 
-`RollingWindowFunction` is the most critical class. It maintains a per-engine rolling buffer of the last 30 normalized sensor readings in Flink managed state. When the buffer reaches exactly 30 entries, it emits a `FeatureVector` ready for GRU inference.
+`RollingWindowFunction` maintains a per-engine rolling buffer of the last 30 normalized sensor readings. When the buffer reaches exactly 30 entries it emits a `FeatureVector` ready for GRU inference.
 
-```java
-// src/main/java/com/predictivemaintenance/pipeline/functions/RollingWindowFunction.java
-package com.predictivemaintenance.pipeline.functions;
+```python
+# streaming/pipeline/functions/rolling_window.py
+from collections import deque
+from typing import Callable, Optional
+from dataclasses import dataclass, field
 
-import org.apache.flink.api.common.state.*;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
-import org.apache.flink.util.Collector;
-import com.predictivemaintenance.model.EngineEvent;
-import com.predictivemaintenance.model.FeatureVector;
-import java.util.*;
+from streaming.model.engine_event import EngineEvent, SENSOR_NAMES
+from streaming.model.feature_vector import FeatureVector
 
-public class RollingWindowFunction
-        extends KeyedProcessFunction<String, EngineEvent, FeatureVector> {
 
-    private final int windowSize;
-    private transient ListState<float[]>  cycleBuffer;
-    private transient ValueState<Integer> lastCycleState;
+@dataclass
+class EngineBuffer:
+    """Per-engine rolling state. Equivalent to Flink's ListState[float[]]."""
+    window: deque = field(default_factory=deque)  # deque of List[float]
+    last_cycle: int = -1
 
-    public RollingWindowFunction(int windowSize) {
-        this.windowSize = windowSize;
-    }
 
-    @Override
-    public void open(Configuration params) {
-        // ListState: Flink serializes this to RocksDB / heap state backend.
-        // On checkpoint, it is persisted to S3. On recovery, Flink restores
-        // it automatically — your buffer survives job failures.
-        ListStateDescriptor<float[]> bufferDesc =
-            new ListStateDescriptor<>("cycle-buffer", TypeInformation.of(float[].class));
-        cycleBuffer = getRuntimeContext().getListState(bufferDesc);
+class RollingWindowFunction:
+    """
+    Maintains per-engine rolling buffers and emits FeatureVectors.
 
-        // ValueState: tracks the last seen cycle number per engine.
-        // Used to drop duplicate or out-of-order events.
-        ValueStateDescriptor<Integer> cycleDesc =
-            new ValueStateDescriptor<>("last-cycle", Integer.class);
-        lastCycleState = getRuntimeContext().getState(cycleDesc);
-    }
+    In PyFlink this is wrapped as a KeyedProcessFunction.
+    In pure-Python mode (standalone producer/consumer) it is used directly.
 
-    @Override
-    public void processElement(EngineEvent event, Context ctx, Collector<FeatureVector> out)
-            throws Exception {
+    Args:
+        window_size:  Number of cycles in the sliding window (default 30).
+        on_feature:   Callback invoked with each emitted FeatureVector.
+    """
 
-        Integer lastCycle = lastCycleState.value();
+    def __init__(
+        self,
+        window_size: int = 30,
+        on_feature: Optional[Callable[[FeatureVector], None]] = None,
+    ):
+        self.window_size = window_size
+        self.on_feature  = on_feature
+        # Per-engine state dict — in PyFlink this is backed by managed ListState.
+        self._buffers: dict[str, EngineBuffer] = {}
 
-        // Guard: drop events that are duplicates or arrive out of order.
-        // This handles Solace at-least-once re-delivery on checkpoint recovery.
-        if (lastCycle != null && event.getCycle() <= lastCycle) {
-            return;
-        }
-        lastCycleState.update(event.getCycle());
+    def process(self, event: EngineEvent) -> Optional[FeatureVector]:
+        """
+        Process one normalized EngineEvent.
 
-        float[] sensorRow = extractSensors(event);
-        cycleBuffer.add(sensorRow);
+        Returns a FeatureVector when the buffer is full, else None.
+        Drops duplicate or out-of-order cycles (handles at-least-once re-delivery).
+        """
+        state = self._buffers.setdefault(event.engine_id, EngineBuffer())
 
-        // Materialize to a list to check size and trim the oldest entry
-        List<float[]> buffer = new ArrayList<>();
-        for (float[] row : cycleBuffer.get()) buffer.add(row);
+        # Guard: drop duplicates and late arrivals
+        if event.cycle <= state.last_cycle:
+            return None
+        state.last_cycle = event.cycle
 
-        if (buffer.size() > windowSize) {
-            // Trim to the last windowSize entries (sliding, not tumbling)
-            buffer = buffer.subList(buffer.size() - windowSize, buffer.size());
-            cycleBuffer.update(buffer);
-        }
+        # Append normalized sensor row, evict oldest if over limit
+        state.window.append(event.sensor_array())
+        if len(state.window) > self.window_size:
+            state.window.popleft()
 
-        // Only emit once we have a full window — never emit partial sequences
-        if (buffer.size() == windowSize) {
-            out.collect(buildFeatureVector(event.getEngineId(), event.getCycle(),
-                                           buffer, ctx.timestamp()));
-        }
-    }
+        # Only emit when we have a full window — never emit partial sequences
+        if len(state.window) == self.window_size:
+            flat = [v for row in state.window for v in row]
+            fv = FeatureVector(
+                engine_id=event.engine_id,
+                cycle=event.cycle,
+                event_time=event.event_time_ms,
+                features=flat,
+                window_size=self.window_size,
+                n_sensors=len(SENSOR_NAMES),
+            )
+            if self.on_feature:
+                self.on_feature(fv)
+            return fv
 
-    private float[] extractSensors(EngineEvent e) {
-        return new float[]{
-            e.getS2(), e.getS3(), e.getS4(), e.getS7(),  e.getS9(),
-            e.getS11(), e.getS12(), e.getS14(), e.getS17(), e.getS20(), e.getS21()
-        };
-    }
-
-    private FeatureVector buildFeatureVector(String engineId, int cycle,
-                                              List<float[]> buffer, long eventTime) {
-        // Flatten (30, 11) → (330,) for serialization.
-        // The inference service reshapes back to (1, 30, 11) before model.predict().
-        float[] flat = new float[windowSize * 11];
-        for (int t = 0; t < buffer.size(); t++) {
-            System.arraycopy(buffer.get(t), 0, flat, t * 11, 11);
-        }
-        return new FeatureVector(engineId, cycle, eventTime, flat, windowSize, 11);
-    }
-}
+        return None
 ```
 
-**Why `ListState` and not a local `ArrayList`?**
+**Why `deque` and not a plain `list`?**
 
-A local field is an instance variable on the `RollingWindowFunction` object. When Flink restarts after a failure, it constructs a fresh instance — that field is gone. `ListState` is backed by Flink's state backend (heap or RocksDB), included in every checkpoint, and restored transparently. This is the core contract of stateful stream processing: state survives failures.
+`collections.deque(maxlen=30)` could be used for automatic eviction, but an explicit deque gives clearer intent and allows inspection of buffer length before deciding to emit. In PyFlink's managed state equivalent, the buffer is stored as `ListState[List[float]]` on the RocksDB state backend — it survives job failures and is restored from checkpoints automatically.
 
-**Memory footprint.** 100 active engines × 30 cycles × 11 sensors × 4 bytes = 132 KB. Negligible in both heap and RocksDB backends.
-
----
-
-## FeatureVector Model Class
-
-```java
-// src/main/java/com/predictivemaintenance/model/FeatureVector.java
-package com.predictivemaintenance.model;
-
-import java.io.Serializable;
-
-// Must be Serializable: Flink shuffles FeatureVector across the network to sinks
-public class FeatureVector implements Serializable {
-
-    private String  engineId;
-    private int     cycle;
-    private long    eventTime;
-    private float[] features;   // flattened: [windowSize * nSensors]
-    private int     windowSize;
-    private int     nSensors;
-
-    public FeatureVector() {}
-
-    public FeatureVector(String engineId, int cycle, long eventTime,
-                         float[] features, int windowSize, int nSensors) {
-        this.engineId   = engineId;
-        this.cycle      = cycle;
-        this.eventTime  = eventTime;
-        this.features   = features;
-        this.windowSize = windowSize;
-        this.nSensors   = nSensors;
-    }
-
-    public String  getEngineId()   { return engineId; }
-    public int     getCycle()      { return cycle; }
-    public long    getEventTime()  { return eventTime; }
-    public float[] getFeatures()   { return features; }
-    public int     getWindowSize() { return windowSize; }
-    public int     getNSensors()   { return nSensors; }
-
-    public void setEngineId(String v)   { engineId = v; }
-    public void setCycle(int v)         { cycle = v; }
-    public void setEventTime(long v)    { eventTime = v; }
-    public void setFeatures(float[] v)  { features = v; }
-    public void setWindowSize(int v)    { windowSize = v; }
-    public void setNSensors(int v)      { nSensors = v; }
-}
-```
+**Memory footprint.** 100 active engines × 30 cycles × 11 sensors × 4 bytes = 132 KB. Negligible.
 
 ---
 
 ## Redis Sink — Online Feature Store
 
-```java
-// src/main/java/com/predictivemaintenance/pipeline/sinks/RedisSink.java
-package com.predictivemaintenance.pipeline.sinks;
+```python
+# streaming/pipeline/sinks/redis_sink.py
+import redis
+from streaming.model.feature_vector import FeatureVector
 
-import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
-import org.apache.flink.configuration.Configuration;
-import redis.clients.jedis.*;
-import com.predictivemaintenance.model.FeatureVector;
-import java.nio.ByteBuffer;
-import java.util.*;
+TTL_SECONDS = 3_600  # evict engines inactive for 1 hour
 
-public class RedisSink extends RichSinkFunction<FeatureVector> {
 
-    private static final int TTL_SECONDS = 3600; // evict engines inactive for 1 hour
+class RedisSink:
+    """
+    Writes FeatureVectors to Redis as big-endian float32 byte arrays.
 
-    private final String host;
-    private final int    port;
-    private transient JedisPool pool;
+    Key schema:
+        engine:{id}:features  → bytes  (1320 bytes = 330 float32 values = 30×11 window)
+        engine:{id}:meta      → hash   { engine_id, cycle, event_time, window_size, n_sensors }
 
-    public RedisSink(String host, int port) {
-        this.host = host;
-        this.port = port;
-    }
+    The Python inference service reads these with:
+        struct.unpack(f">{n}f", raw_bytes)
+    """
 
-    @Override
-    public void open(Configuration params) {
-        JedisPoolConfig cfg = new JedisPoolConfig();
-        cfg.setMaxTotal(32);
-        cfg.setMaxIdle(8);
-        cfg.setMinIdle(2);
-        cfg.setTestOnBorrow(true);
-        pool = new JedisPool(cfg, host, port);
-    }
+    def __init__(self, host: str = "localhost", port: int = 6379, db: int = 0):
+        self._pool = redis.ConnectionPool(
+            host=host, port=port, db=db,
+            max_connections=32,
+            decode_responses=False,   # we store raw bytes for the feature tensor
+        )
 
-    @Override
-    public void invoke(FeatureVector fv, Context ctx) {
-        try (Jedis jedis = pool.getResource()) {
-            String engineId  = fv.getEngineId();
-            byte[] featureKey = ("engine:" + engineId + ":features").getBytes();
-            String metaKey    = "engine:" + engineId + ":meta";
+    @property
+    def _client(self) -> redis.Redis:
+        return redis.Redis(connection_pool=self._pool)
 
-            // Atomic pipeline: both writes committed together, one RTT to Redis
-            Pipeline pipe = jedis.pipelined();
+    def write(self, fv: FeatureVector) -> None:
+        """Atomic pipeline write — one RTT to Redis for both keys."""
+        r = self._client
+        pipe = r.pipeline(transaction=False)
 
-            // Store the 330-float tensor as raw bytes (1320 bytes).
-            // The Python inference service deserializes with struct.unpack(">330f", raw).
-            pipe.set(featureKey, serializeFloats(fv.getFeatures()));
-            pipe.expire(featureKey, TTL_SECONDS);
+        # Feature tensor as raw bytes
+        pipe.set(fv.redis_feature_key, fv.to_bytes())
+        pipe.expire(fv.redis_feature_key, TTL_SECONDS)
 
-            // Human-readable metadata for the monitoring service and /health endpoint
-            Map<String, String> meta = new HashMap<>();
-            meta.put("engine_id",   engineId);
-            meta.put("cycle",       String.valueOf(fv.getCycle()));
-            meta.put("event_time",  String.valueOf(fv.getEventTime()));
-            meta.put("window_size", String.valueOf(fv.getWindowSize()));
-            meta.put("n_sensors",   String.valueOf(fv.getNSensors()));
-            pipe.hset(metaKey, meta);
-            pipe.expire(metaKey, TTL_SECONDS);
+        # Human-readable metadata for monitoring and /health endpoint
+        pipe.hset(fv.redis_meta_key, mapping={
+            "engine_id":   fv.engine_id,
+            "cycle":       str(fv.cycle),
+            "event_time":  str(fv.event_time),
+            "window_size": str(fv.window_size),
+            "n_sensors":   str(fv.n_sensors),
+        })
+        pipe.expire(fv.redis_meta_key, TTL_SECONDS)
 
-            pipe.sync();
-        }
-    }
+        pipe.execute()
 
-    private byte[] serializeFloats(float[] values) {
-        ByteBuffer buf = ByteBuffer.allocate(values.length * Float.BYTES);
-        // Big-endian matches Python struct.pack(">Nf") convention
-        for (float v : values) buf.putFloat(v);
-        return buf.array();
-    }
-
-    @Override
-    public void close() {
-        if (pool != null) pool.close();
-    }
-}
+    def close(self) -> None:
+        self._pool.disconnect()
 ```
 
-**Redis key schema:**
-
-```
-engine:{id}:features  →  bytes  (1320 bytes = 330 float32 values = 30 × 11 window)
-engine:{id}:meta      →  hash   { engine_id, cycle, event_time, window_size, n_sensors }
-```
-
-Both keys share the same TTL. If a broker connection drops and engine telemetry stops flowing, Redis automatically evicts the stale features after one hour — the inference service returns 404 for that engine, preventing predictions on stale data.
+**TTL design:** If a broker connection drops and engine telemetry stops flowing, Redis automatically evicts stale features after one hour. The inference service returns 404 for that engine, preventing predictions on stale data.
 
 ---
 
 ## S3 Parquet Sink
 
-```java
-// src/main/java/com/predictivemaintenance/pipeline/sinks/S3ParquetSink.java
-package com.predictivemaintenance.pipeline.sinks;
+```python
+# streaming/pipeline/sinks/s3_parquet_sink.py
+import io
+from datetime import datetime, timezone
+from typing import List
 
-import org.apache.flink.connector.file.sink.FileSink;
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.formats.parquet.avro.AvroParquetWriters;
-import org.apache.flink.streaming.api.functions.sink.filesystem.bucketassigners.DateTimeBucketAssigner;
-import org.apache.flink.streaming.api.functions.sink.filesystem.rollingpolicies.OnCheckpointRollingPolicy;
-import com.predictivemaintenance.model.FeatureVector;
+import boto3
+import pyarrow as pa
+import pyarrow.parquet as pq
 
-public class S3ParquetSink {
+from streaming.model.feature_vector import FeatureVector
 
-    public static FileSink<FeatureVector> build(String basePath) {
-        return FileSink
-            .<FeatureVector>forBulkFormat(
-                new Path(basePath),
-                AvroParquetWriters.forReflectRecord(FeatureVector.class)
-            )
-            // Roll (close and commit) Parquet files on every Flink checkpoint.
-            // In-progress files are invisible until committed — guarantees
-            // no partial Parquet files land in S3.
-            .withRollingPolicy(OnCheckpointRollingPolicy.build())
-            // Partition output: s3://…/features/date=2024-01-15/hour=10/part-0.parquet
-            .withBucketAssigner(new DateTimeBucketAssigner<>("'date='yyyy-MM-dd/'hour='HH"))
-            .build();
-    }
-}
+
+# PyArrow schema for FeatureVector — matches the training pipeline's Parquet schema
+FEATURE_SCHEMA = pa.schema([
+    pa.field("engine_id",   pa.string()),
+    pa.field("cycle",       pa.int32()),
+    pa.field("event_time",  pa.int64()),
+    pa.field("features",    pa.list_(pa.float32())),
+    pa.field("window_size", pa.int32()),
+    pa.field("n_sensors",   pa.int32()),
+    pa.field("date",        pa.string()),   # Hive partition key
+    pa.field("hour",        pa.string()),   # Hive partition key
+])
+
+
+class S3ParquetSink:
+    """
+    Buffers FeatureVectors and flushes to S3 as Parquet files.
+
+    Output layout (Hive-partitioned, compatible with PyArrow dataset reader):
+        s3://{bucket}/features/date=YYYY-MM-DD/hour=HH/part-{n}.parquet
+
+    In PyFlink, this sink is invoked per-checkpoint to match exactly-once semantics.
+    In standalone mode, call flush() periodically or on shutdown.
+    """
+
+    def __init__(
+        self,
+        bucket:    str = "aircraft-engine-data",
+        prefix:    str = "features",
+        endpoint:  str = "http://localhost:9001",   # MinIO for local dev
+        aws_key:   str = "minioadmin",
+        aws_secret: str = "minioadmin",
+    ):
+        self._bucket  = bucket
+        self._prefix  = prefix
+        self._buffer:  List[FeatureVector] = []
+        self._s3 = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=aws_key,
+            aws_secret_access_key=aws_secret,
+        )
+        self._part_index = 0
+
+    def add(self, fv: FeatureVector) -> None:
+        """Buffer one FeatureVector for the next flush."""
+        self._buffer.append(fv)
+
+    def flush(self) -> int:
+        """
+        Write buffered FeatureVectors to S3 as a Parquet file.
+        Returns the number of rows written. Clears the buffer.
+        """
+        if not self._buffer:
+            return 0
+
+        now  = datetime.now(timezone.utc)
+        date = now.strftime("%Y-%m-%d")
+        hour = now.strftime("%H")
+
+        rows = {
+            "engine_id":   [fv.engine_id          for fv in self._buffer],
+            "cycle":       [fv.cycle               for fv in self._buffer],
+            "event_time":  [fv.event_time          for fv in self._buffer],
+            "features":    [fv.features            for fv in self._buffer],
+            "window_size": [fv.window_size         for fv in self._buffer],
+            "n_sensors":   [fv.n_sensors           for fv in self._buffer],
+            "date":        [date] * len(self._buffer),
+            "hour":        [hour] * len(self._buffer),
+        }
+
+        table  = pa.Table.from_pydict(rows, schema=FEATURE_SCHEMA)
+        buf    = io.BytesIO()
+        pq.write_table(table, buf, compression="snappy")
+        buf.seek(0)
+
+        key = f"{self._prefix}/date={date}/hour={hour}/part-{self._part_index}.parquet"
+        self._s3.put_object(Bucket=self._bucket, Key=key, Body=buf.getvalue())
+
+        n = len(self._buffer)
+        self._buffer.clear()
+        self._part_index += 1
+        return n
+
+    def close(self) -> None:
+        """Flush any remaining buffered records on shutdown."""
+        self.flush()
 ```
 
 **Resulting S3 layout:**
@@ -1140,21 +798,19 @@ s3://aircraft-engine-data/
   features/
     date=2024-01-15/
       hour=10/
-        part-0-0.parquet      ← Flink subtask 0, first file of that hour
-        part-1-0.parquet      ← Flink subtask 1
-        ...
+        part-0.parquet
+        part-1.parquet
       hour=11/
-        part-0-0.parquet
+        part-0.parquet
     date=2024-01-16/
       ...
   flink-checkpoints/
     job-{id}/
       chk-1/
       chk-2/
-      ...
 ```
 
-The retraining pipeline reads all Parquet files under `features/` using a date-range filter:
+The retraining pipeline reads all Parquet files using a date-range filter:
 
 ```python
 import pyarrow.dataset as ds
@@ -1172,231 +828,366 @@ df = table.to_pandas()
 
 ---
 
-## Watermarks and Event-Time Processing
+## PyFlink Pipeline — Entry Point
 
-Watermarks tell Flink where the stream's event-time frontier is. Without them, Flink cannot reason about "how late can events still arrive" and would never close event-time windows.
+Apache Flink's Python API (PyFlink) exposes the same DataStream operators, keyed state, and checkpoint semantics as the Java API. The Solace source uses the Python wrapper around the JCSMP connector via `pyflink.datastream.connectors`.
 
-For this pipeline, `RollingWindowFunction` uses a count-based sliding window (maintained in `ListState`), not a Flink time window. Watermarks here serve a secondary purpose: they advance Flink's processing-time timers (used by Flink's internal cleanup and metric reporting) and prevent stalled watermarks from blocking operator progress when some Solace consumer sessions go idle.
+```python
+# streaming/pipeline/telemetry_pipeline.py
+"""
+PyFlink entry point for the Aircraft Telemetry Feature Pipeline.
 
-**Idle consumer sessions:** If engine ENG-007 is on the ground and sends no telemetry for 10 minutes, the Solace consumer session bound to its queue partition has no messages. Without `withIdleness(60s)`, that session's watermark stays frozen at the last event from ENG-007, blocking the global watermark from advancing. `withIdleness(Duration.ofSeconds(60))` tells Flink to treat that consumer session as inactive after 60 seconds of silence, allowing other sessions to advance the global watermark normally.
+Run with:
+    flink run -py streaming/pipeline/telemetry_pipeline.py \
+              --parallelism 8 \
+              -pyfs streaming/
+"""
+import os
+from pyflink.datastream import StreamExecutionEnvironment, CheckpointingMode
+from pyflink.datastream.connectors.kafka import (
+    # PyFlink uses the Flink-Kafka connector as the generic source bridge;
+    # for Solace, pass the Solace JCSMP JAR as an external dependency
+    # and use the SolaceSource Java class via add_jars().
+)
+from pyflink.common import WatermarkStrategy, Duration
+from pyflink.datastream.functions import MapFunction, KeyedProcessFunction, RuntimeContext
+from pyflink.datastream.state import ListStateDescriptor, ValueStateDescriptor
+from pyflink.common.typeinfo import Types
+
+from streaming.model.engine_event import EngineEvent, SENSOR_NAMES
+from streaming.model.feature_vector import FeatureVector
+from streaming.pipeline.functions.normalization import NormalizationFunction
+from streaming.pipeline.sinks.redis_sink import RedisSink
+from streaming.pipeline.sinks.s3_parquet_sink import S3ParquetSink
+
+
+# ── PyFlink wrapper for NormalizationFunction ─────────────────────────────────
+class NormalizeMap(MapFunction):
+    def __init__(self, scaler_path: str):
+        self._path   = scaler_path
+        self._fn     = None
+
+    def open(self, runtime_context: RuntimeContext):
+        # Loaded once per TaskManager — not per event
+        self._fn = NormalizationFunction(self._path)
+
+    def map(self, event: EngineEvent) -> EngineEvent:
+        return self._fn.normalize(event)
+
+
+# ── PyFlink wrapper for RollingWindowFunction (stateful, keyed) ───────────────
+class RollingWindowProcess(KeyedProcessFunction):
+    """
+    Maintains per-engine ListState[List[float]] in Flink's managed state backend.
+    State is checkpointed to S3 every 30 seconds and restored on failure.
+    """
+    WINDOW_SIZE = 30
+
+    def open(self, runtime_context: RuntimeContext):
+        # ListState: one list of sensor rows per engine key
+        buffer_desc = ListStateDescriptor("cycle-buffer", Types.PICKLED_BYTE_ARRAY())
+        self._buffer = runtime_context.get_list_state(buffer_desc)
+
+        last_cycle_desc = ValueStateDescriptor("last-cycle", Types.INT())
+        self._last_cycle = runtime_context.get_state(last_cycle_desc)
+
+    def process_element(self, event: EngineEvent, ctx, out):
+        last = self._last_cycle.value()
+
+        # Drop duplicate or out-of-order events (at-least-once re-delivery guard)
+        if last is not None and event.cycle <= last:
+            return
+        self._last_cycle.update(event.cycle)
+
+        # Append to managed state
+        self._buffer.add(event.sensor_array())
+
+        # Materialize to check length
+        rows = list(self._buffer.get())
+        if len(rows) > self.WINDOW_SIZE:
+            rows = rows[-self.WINDOW_SIZE:]
+            self._buffer.clear()
+            for row in rows:
+                self._buffer.add(row)
+
+        # Emit only when we have a full window
+        if len(rows) == self.WINDOW_SIZE:
+            flat = [v for row in rows for v in row]
+            fv = FeatureVector(
+                engine_id=event.engine_id,
+                cycle=event.cycle,
+                event_time=event.event_time_ms,
+                features=flat,
+                window_size=self.WINDOW_SIZE,
+                n_sensors=len(SENSOR_NAMES),
+            )
+            out.collect(fv)
+
+
+# ── PyFlink Redis sink wrapper ─────────────────────────────────────────────────
+class RedisSinkFunction(MapFunction):
+    def open(self, _):
+        self._sink = RedisSink(
+            host=os.environ.get("REDIS_HOST", "localhost"),
+            port=int(os.environ.get("REDIS_PORT", "6379")),
+        )
+
+    def map(self, fv: FeatureVector) -> FeatureVector:
+        self._sink.write(fv)
+        return fv   # pass-through for the S3 branch
+
+    def close(self):
+        self._sink.close()
+
+
+def build_pipeline():
+    env = StreamExecutionEnvironment.get_execution_environment()
+
+    # ── Checkpointing ──────────────────────────────────────────────────────────
+    env.enable_checkpointing(30_000)   # every 30 seconds
+    env.get_checkpoint_config().set_checkpointing_mode(CheckpointingMode.EXACTLY_ONCE)
+    env.get_checkpoint_config().set_min_pause_between_checkpoints(10_000)
+    env.get_checkpoint_config().set_tolerable_checkpoint_failure_number(2)
+
+    # RocksDB state backend — required for production (state > heap)
+    from pyflink.datastream.state_backend import RocksDBStateBackend
+    env.set_state_backend(RocksDBStateBackend(
+        "s3://aircraft-engine-data/flink-checkpoints/",
+        incremental_checkpoints=True,
+    ))
+
+    env.set_parallelism(8)   # match Solace queue partition count
+
+    # ── Source: Solace via external JAR ───────────────────────────────────────
+    # Add the Solace Flink connector JAR to the classpath:
+    env.add_jars("file:///opt/flink/lib/flink-connector-solace-1.1.0.jar")
+
+    # The SolaceSource is configured via Java interop (JVM bridge in PyFlink).
+    # For a fully Python source (local dev / testing), use the standalone consumer below.
+    # In production, keep the Solace connector JAR for exactly-once ACK semantics.
+    solace_source = _build_solace_source()
+
+    raw_stream = (
+        env.from_source(solace_source, WatermarkStrategy.no_watermarks(), "Solace Source")
+           .name("solace-telemetry-source")
+    )
+
+    # ── Stage 1: Normalization (stateless) ─────────────────────────────────────
+    normalized = (
+        raw_stream
+        .map(NormalizeMap("streaming/resources/scaler_params.csv"))
+        .name("minmax-normalization")
+    )
+
+    # ── Stage 2: Rolling Window (stateful, keyed by engine_id) ─────────────────
+    features = (
+        normalized
+        .key_by(lambda e: e.engine_id)
+        .process(RollingWindowProcess())
+        .name("rolling-window-feature-builder")
+    )
+
+    # ── Sink 1: Redis (online feature store) ───────────────────────────────────
+    features.map(RedisSinkFunction()).name("redis-online-feature-sink")
+
+    # ── Sink 2: S3 Parquet (offline store) — handled by checkpoint-aligned flush
+    features.add_sink(_build_s3_sink()).name("s3-parquet-offline-sink")
+
+    env.execute("Aircraft Telemetry Feature Pipeline (PyFlink + Solace)")
+
+
+def _build_solace_source():
+    """
+    Builds the Solace source using the Java connector via PyFlink's JVM bridge.
+    Requires flink-connector-solace JAR on the classpath.
+    """
+    from pyflink.java_gateway import get_gateway
+    gw = get_gateway()
+
+    jvm = gw.jvm
+    props = jvm.com.solacesystems.jcsmp.JCSMPProperties()
+    props.setProperty("HOST",     os.environ.get("SOLACE_HOST",     "tcp://localhost:55555"))
+    props.setProperty("VPN_NAME", os.environ.get("SOLACE_VPN",      "default"))
+    props.setProperty("USERNAME", os.environ.get("SOLACE_USERNAME",  "admin"))
+    props.setProperty("PASSWORD", os.environ.get("SOLACE_PASSWORD",  "admin"))
+
+    return (
+        jvm.com.solace.connector.flink.SolaceSource.builder()
+        .setSessionProperties(props)
+        .setQueueName(os.environ.get("SOLACE_QUEUE_NAME", "flink.feature.processor"))
+        .setAckMode(
+            jvm.com.solace.connector.flink.SolaceSourceConfiguration.AckMode.ON_CHECKPOINT
+        )
+        .build()
+    )
+
+
+def _build_s3_sink():
+    """Returns a Flink SinkFunction that batches and flushes to S3 Parquet on checkpoint."""
+    from pyflink.datastream.functions import SinkFunction
+
+    class S3CheckpointSink(SinkFunction):
+        def open(self, _):
+            self._sink = S3ParquetSink(
+                bucket=os.environ.get("S3_BUCKET",      "aircraft-engine-data"),
+                endpoint=os.environ.get("MINIO_ENDPOINT", "http://localhost:9001"),
+                aws_key=os.environ.get("MINIO_USER",    "minioadmin"),
+                aws_secret=os.environ.get("MINIO_PASS", "minioadmin"),
+            )
+
+        def invoke(self, fv: FeatureVector, _):
+            self._sink.add(fv)
+
+        def finish(self):
+            # Called on checkpoint — flush buffered Parquet rows to S3
+            n = self._sink.flush()
+            if n:
+                print(f"[s3-sink] Flushed {n} records to Parquet")
+
+        def close(self):
+            self._sink.close()
+
+    return S3CheckpointSink()
+
+
+if __name__ == "__main__":
+    import dotenv
+    dotenv.load_dotenv("config/solace.env")
+    build_pipeline()
+```
 
 ---
 
-## Docker Compose — Full Local Stack
+## Standalone Python Consumer (No Flink — Development Mode)
 
-```yaml
-# docker-compose.yml
-version: "3.9"
+For local development, testing, or environments where Flink is not available, a pure Python consumer replicates the same pipeline logic:
 
-services:
+```python
+# streaming/pipeline/standalone_consumer.py
+"""
+Standalone Python consumer — same logic as PyFlink, without the cluster.
+Use for local development and integration tests.
 
-  # ── Event Broker ───────────────────────────────────────────────────────────
-  solace:
-    image: solace/solace-pubsub-standard:latest
-    hostname: solace
-    ports:
-      - "8080:8080"    # Solace Manager UI
-      - "55555:55555"  # SMF (Flink connector)
-      - "1883:1883"    # MQTT (avionics devices)
-      - "9000:9000"    # REST messaging (ground station HTTP clients)
-      - "5672:5672"    # AMQP 1.0
-    environment:
-      username_admin_globalaccesslevel: admin
-      username_admin_password: admin
-      system_scaling_maxconnectioncount: "1000"
-    shm_size: "2g"
-    ulimits:
-      core: -1
-      nofile:
-        soft: 2448
-        hard: 38048
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/SEMP/v2/config"]
-      interval: 15s
-      retries: 8
+Run:
+    python -m streaming.pipeline.standalone_consumer
+"""
+import os, json, signal, sys
+from solace.messaging.messaging_service import MessagingService
+from solace.messaging.receiver.persistent_message_receiver import PersistentMessageReceiver
+from solace.messaging.resources.queue import Queue
+from solace.messaging.config.solace_properties import (
+    transport_layer_properties as TL,
+    service_properties as SP,
+    authentication_properties as AUTH,
+)
 
-  # ── Online Feature Store ────────────────────────────────────────────────────
-  redis:
-    image: redis:7.2-alpine
-    ports:
-      - "6379:6379"
-    command: >
-      redis-server
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
-      --save ""
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+from streaming.model.engine_event import EngineEvent
+from streaming.pipeline.functions.normalization import NormalizationFunction
+from streaming.pipeline.functions.rolling_window import RollingWindowFunction
+from streaming.pipeline.sinks.redis_sink import RedisSink
+from streaming.pipeline.sinks.s3_parquet_sink import S3ParquetSink
 
-  # ── S3-Compatible Local Storage ─────────────────────────────────────────────
-  minio:
-    image: minio/minio:latest
-    ports:
-      - "9001:9000"   # S3 API (Flink writes here)
-      - "9002:9001"   # MinIO console UI
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
+FLUSH_EVERY = 500   # write to S3 every N FeatureVectors
+_running    = True
 
-  # ── Flink JobManager ────────────────────────────────────────────────────────
-  flink-jobmanager:
-    image: apache/flink:1.19-scala_2.12-java17
-    ports:
-      - "8082:8081"   # Flink Web UI
-    command: jobmanager
-    environment:
-      FLINK_PROPERTIES: |
-        jobmanager.rpc.address: flink-jobmanager
-        state.backend: rocksdb
-        state.backend.incremental: true
-        state.checkpoints.dir: s3://aircraft-engine-data/flink-checkpoints/
-        s3.access-key: minioadmin
-        s3.secret-key: minioadmin
-        s3.endpoint: http://minio:9000
-        s3.path.style.access: true
-        taskmanager.numberOfTaskSlots: 4
-        execution.checkpointing.interval: 30000
-    depends_on:
-      solace:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
 
-  flink-taskmanager:
-    image: apache/flink:1.19-scala_2.12-java17
-    command: taskmanager
-    depends_on:
-      - flink-jobmanager
-    deploy:
-      replicas: 2  # 2 TaskManagers × 4 slots = 8 slots, matching parallelism 8
-    environment:
-      FLINK_PROPERTIES: |
-        jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 4
-        taskmanager.memory.process.size: 2g
-        state.backend: rocksdb
-        state.backend.incremental: true
-        state.checkpoints.dir: s3://aircraft-engine-data/flink-checkpoints/
-        s3.access-key: minioadmin
-        s3.secret-key: minioadmin
-        s3.endpoint: http://minio:9000
-        s3.path.style.access: true
+def _shutdown(signum, frame):
+    global _running
+    print("\n[consumer] Shutting down…")
+    _running = False
 
-volumes:
-  minio_data:
+
+def run_consumer():
+    signal.signal(signal.SIGINT,  _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    # ── Messaging service ─────────────────────────────────────────────────────
+    service = MessagingService.builder().from_properties({
+        TL.HOST:      os.environ.get("SOLACE_HOST",     "tcp://localhost:55555"),
+        SP.VPN_NAME:  os.environ.get("SOLACE_VPN",      "default"),
+        AUTH.SCHEME_BASIC_USER_NAME: os.environ.get("SOLACE_USERNAME", "admin"),
+        AUTH.SCHEME_BASIC_PASSWORD:  os.environ.get("SOLACE_PASSWORD", "admin"),
+    }).build()
+    service.connect()
+
+    queue    = Queue.durable_exclusive_queue(
+        os.environ.get("SOLACE_QUEUE_NAME", "flink.feature.processor")
+    )
+    receiver: PersistentMessageReceiver = (
+        service.create_persistent_message_receiver_builder()
+        .build(queue)
+    )
+    receiver.start()
+
+    # ── Pipeline components ───────────────────────────────────────────────────
+    normalizer = NormalizationFunction("streaming/resources/scaler_params.csv")
+    windower   = RollingWindowFunction(window_size=30)
+    redis_sink = RedisSink(
+        host=os.environ.get("REDIS_HOST", "localhost"),
+        port=int(os.environ.get("REDIS_PORT", "6379")),
+    )
+    s3_sink = S3ParquetSink(
+        bucket=os.environ.get("S3_BUCKET",       "aircraft-engine-data"),
+        endpoint=os.environ.get("MINIO_ENDPOINT", "http://localhost:9001"),
+        aws_key=os.environ.get("MINIO_USER",      "minioadmin"),
+        aws_secret=os.environ.get("MINIO_PASS",   "minioadmin"),
+    )
+
+    processed  = 0
+    fv_emitted = 0
+
+    print("[consumer] Listening for telemetry events…")
+
+    while _running:
+        msg = receiver.receive_message(timeout=1_000)   # 1-second poll
+        if msg is None:
+            continue
+
+        try:
+            event = EngineEvent.from_json(msg.get_payload_as_bytes())
+
+            # Stage 1 — normalize
+            event = normalizer.normalize(event)
+
+            # Stage 2 — rolling window
+            fv = windower.process(event)
+
+            # Sinks
+            if fv is not None:
+                redis_sink.write(fv)
+                s3_sink.add(fv)
+                fv_emitted += 1
+
+                if fv_emitted % FLUSH_EVERY == 0:
+                    n = s3_sink.flush()
+                    print(f"[consumer] {fv_emitted} FeatureVectors emitted, {n} flushed to S3")
+
+            receiver.ack(msg)   # ACK after successful processing
+            processed += 1
+
+        except Exception as exc:
+            print(f"[consumer] Error processing message: {exc}", file=sys.stderr)
+            receiver.nack(msg)  # NACK — Solace will redeliver
+
+    # Graceful shutdown
+    s3_sink.close()
+    redis_sink.close()
+    receiver.terminate()
+    service.disconnect()
+    print(f"[consumer] Stopped. Processed {processed} events, emitted {fv_emitted} FeatureVectors.")
+
+
+if __name__ == "__main__":
+    import dotenv
+    dotenv.load_dotenv("config/solace.env")
+    run_consumer()
 ```
-
-**RocksDB state backend** is mandatory for production: it stores Flink state on disk rather than JVM heap, supports state larger than available memory, and produces incremental checkpoints (only changed RocksDB SST files go to S3, not the full state). For 100 engines at window size 30, heap backend works fine in development — switch to RocksDB before going to production.
-
----
-
-## Build and Submit
-
-```bash
-# 1. Export scaler parameters from Python training artifacts
-python scripts/export_scaler_params.py
-
-# 2. Build the fat JAR (skip tests for speed during iteration)
-mvn clean package -DskipTests
-
-# Verify the JAR was built (should be ~150-200 MB with all dependencies)
-ls -lh target/streaming-pipeline-1.0.0.jar
-
-# 3. Start the infrastructure
-docker-compose up -d
-
-# 4. Wait for Solace to be fully up, then provision the queues
-# (Solace takes ~30-60 seconds to start)
-./scripts/provision_solace_queues.sh
-
-# 5. Create the S3 bucket in MinIO
-docker-compose exec minio mc alias set local http://localhost:9000 minioadmin minioadmin
-docker-compose exec minio mc mb local/aircraft-engine-data
-
-# 6. Upload the Flink JAR via the REST API
-JAR_ID=$(curl -s -X POST http://localhost:8082/jars/upload \
-  -H "Expect:" \
-  -F "jarfile=@target/streaming-pipeline-1.0.0.jar" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['filename'].split('/')[-1])")
-
-echo "JAR ID: $JAR_ID"
-
-# 7. Submit the Flink job
-curl -X POST "http://localhost:8082/jars/${JAR_ID}/run" \
-  -H "Content-Type: application/json" \
-  -d '{"entryClass": "com.predictivemaintenance.pipeline.TelemetryPipeline", "parallelism": 8}'
-
-# 8. Run the telemetry producer
-java -cp target/streaming-pipeline-1.0.0.jar \
-  com.predictivemaintenance.producer.TelemetryProducer
-```
-
----
-
-## Observing the Running Pipeline
-
-**Flink Web UI (`http://localhost:8082`):**
-
-Check the job graph (DAG of operators), throughput per operator (records/sec), backpressure indicators (red = downstream sink is slower than upstream), and checkpoint history. Every checkpoint shows its duration and size — a checkpoint that takes longer than the interval (30s) indicates state is growing or S3 write speed is a bottleneck.
-
-**Solace Manager UI (`http://localhost:8080`):**
-
-Navigate to Queues → `flink.feature.processor`. You can see current queue depth (messages waiting to be consumed), consumer connections (should show 8 Flink subtasks), and message rate. Queue depth near 0 in steady state means Flink is keeping up. Growing queue depth means Flink's `RollingWindowFunction` or Redis sink is a bottleneck.
-
-**Inspect Redis live:**
-
-```bash
-docker-compose exec redis redis-cli
-
-# List all engines with features
-KEYS engine:*:meta
-
-# Inspect a specific engine
-HGETALL engine:ENG-001:meta
-
-# Verify feature tensor size (should be 1320 bytes = 330 floats × 4 bytes)
-STRLEN engine:ENG-001:features
-
-# Check TTL (should be counting down from 3600)
-TTL engine:ENG-001:features
-```
-
-**Verify Parquet files in MinIO:**
-
-```bash
-# Install mc (MinIO client) or use the console at http://localhost:9002
-docker-compose exec minio mc ls local/aircraft-engine-data/features/
-```
-
----
-
-## Exactly-Once Guarantees
-
-| Layer | Mechanism | Guarantee |
-|-------|-----------|-----------|
-| Producer → Solace broker | Windowed ACK (`PUB_ACK_WINDOW_SIZE`) | At-least-once; broker persists before ACKing |
-| Solace broker durability | Durable queue, message spool | Survives broker restart |
-| Solace → Flink | `AckMode.ON_CHECKPOINT` | At-least-once delivery; messages re-delivered on failure |
-| Flink internal state | Checkpoint-aligned barriers (Chandy-Lamport algorithm) | Exactly-once state |
-| Flink → Redis | At-least-once (Redis has no transactional exactly-once) | Idempotent overwrites |
-| Flink → S3 Parquet | `OnCheckpointRollingPolicy` (files committed on checkpoint) | Exactly-once files |
-
-**Why Redis at-least-once is acceptable here:** The worst case is a duplicate write of the same feature vector for the same engine cycle. The inference service always reads the latest value from `engine:{id}:features` (not an accumulation), so a duplicate write just overwrites with identical data — idempotent. The `lastCycleState` guard in `RollingWindowFunction` prevents duplicate `FeatureVector` emission for the same cycle, making the Redis overwrite semantically correct.
 
 ---
 
 ## FastAPI Integration — Reading from Redis
 
-The inference service reads feature vectors from Redis exactly as Flink wrote them:
+The inference service reads feature vectors from Redis exactly as the consumer wrote them:
 
 ```python
 # src/inference/feature_store.py
@@ -1455,6 +1246,234 @@ async def predict(engine_id: str):
 
 ---
 
+## Watermarks and Event-Time Processing
+
+Watermarks tell Flink where the stream's event-time frontier is. Without them, Flink cannot reason about "how late can events still arrive" and would never close event-time windows.
+
+For this pipeline, `RollingWindowProcess` uses a count-based sliding window maintained in `ListState`, not a Flink time window. Watermarks serve a secondary purpose: they advance Flink's processing-time timers and prevent stalled watermarks from blocking operator progress when some Solace consumer sessions go idle.
+
+**Idle consumer sessions:** If engine ENG-007 is on the ground and sends no telemetry for 10 minutes, the Solace consumer session bound to its queue partition has no messages. Configure idleness tolerance in the WatermarkStrategy to exclude that session from global watermark calculation after 60 seconds of silence.
+
+```python
+from pyflink.common import WatermarkStrategy, Duration
+
+watermark_strategy = (
+    WatermarkStrategy
+    .for_bounded_out_of_orderness(Duration.of_seconds(5))
+    .with_timestamp_assigner(lambda event, _: event.event_time_ms)
+    .with_idleness(Duration.of_seconds(60))
+)
+```
+
+---
+
+## Docker Compose — Full Local Stack
+
+```yaml
+# docker-compose.yml
+version: "3.9"
+
+services:
+
+  # ── Event Broker ───────────────────────────────────────────────────────────
+  solace:
+    image: solace/solace-pubsub-standard:latest
+    hostname: solace
+    ports:
+      - "8080:8080"    # Solace Manager UI
+      - "55555:55555"  # SMF (Flink connector / Python API)
+      - "1883:1883"    # MQTT (avionics devices)
+      - "9000:9000"    # REST messaging (ground station HTTP clients)
+      - "5672:5672"    # AMQP 1.0
+    environment:
+      username_admin_globalaccesslevel: admin
+      username_admin_password: admin
+      system_scaling_maxconnectioncount: "1000"
+    shm_size: "2g"
+    ulimits:
+      core: -1
+      nofile:
+        soft: 2448
+        hard: 38048
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/SEMP/v2/config"]
+      interval: 15s
+      retries: 8
+
+  # ── Online Feature Store ────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+
+  # ── S3-Compatible Local Storage ─────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9001:9000"   # S3 API
+      - "9002:9001"   # MinIO console UI
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+
+  # ── Flink JobManager ────────────────────────────────────────────────────────
+  flink-jobmanager:
+    image: apache/flink:1.19-scala_2.12-java17
+    ports:
+      - "8082:8081"   # Flink Web UI
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        state.backend: rocksdb
+        state.backend.incremental: true
+        state.checkpoints.dir: s3://aircraft-engine-data/flink-checkpoints/
+        s3.access-key: minioadmin
+        s3.secret-key: minioadmin
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        taskmanager.numberOfTaskSlots: 4
+        execution.checkpointing.interval: 30000
+        python.executable: /usr/bin/python3
+    depends_on:
+      solace:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  flink-taskmanager:
+    image: apache/flink:1.19-scala_2.12-java17
+    command: taskmanager
+    depends_on:
+      - flink-jobmanager
+    deploy:
+      replicas: 2  # 2 TaskManagers × 4 slots = 8 slots, matching parallelism 8
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        taskmanager.memory.process.size: 2g
+        state.backend: rocksdb
+        state.backend.incremental: true
+        state.checkpoints.dir: s3://aircraft-engine-data/flink-checkpoints/
+        s3.access-key: minioadmin
+        s3.secret-key: minioadmin
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        python.executable: /usr/bin/python3
+
+volumes:
+  minio_data:
+```
+
+**RocksDB state backend** is mandatory for production: it stores Flink state on disk rather than JVM heap, supports state larger than available memory, and produces incremental checkpoints (only changed RocksDB SST files go to S3, not the full state). For 100 engines at window size 30, heap backend works fine in development — switch to RocksDB before going to production.
+
+---
+
+## Build and Run
+
+```bash
+# 1. Export scaler parameters from Python training artifacts
+python scripts/export_scaler_params.py
+
+# 2. Install Python dependencies
+uv pip install -r streaming/requirements.txt
+
+# 3. Start the infrastructure
+docker-compose up -d
+
+# 4. Wait for Solace to be fully up, then provision the queues (~30-60 seconds)
+./scripts/provision_solace_queues.sh
+
+# 5. Create the S3 bucket in MinIO
+docker-compose exec minio mc alias set local http://localhost:9000 minioadmin minioadmin
+docker-compose exec minio mc mb local/aircraft-engine-data
+
+# ── Option A: PyFlink cluster mode ────────────────────────────────────────────
+# 6a. Submit the PyFlink job to the Flink cluster
+flink run -py streaming/pipeline/telemetry_pipeline.py \
+          --parallelism 8 \
+          -pyfs streaming/ \
+          -j  /opt/flink/lib/flink-connector-solace-1.1.0.jar
+
+# ── Option B: Standalone Python consumer (no Flink cluster needed) ───────────
+# 6b. Run the pure Python consumer directly
+python -m streaming.pipeline.standalone_consumer
+
+# 7. In a separate terminal, run the telemetry producer
+python -m streaming.producer.telemetry_producer
+```
+
+---
+
+## Observing the Running Pipeline
+
+**Flink Web UI (`http://localhost:8082`):**
+
+Check the job graph (DAG of operators), throughput per operator (records/sec), backpressure indicators (red = downstream sink is slower than upstream), and checkpoint history. Every checkpoint shows its duration and size — a checkpoint that takes longer than the interval (30s) indicates state is growing or S3 write speed is a bottleneck.
+
+**Solace Manager UI (`http://localhost:8080`):**
+
+Navigate to Queues → `flink.feature.processor`. You can see current queue depth (messages waiting to be consumed), consumer connections (should show 8 Flink subtasks), and message rate. Queue depth near 0 in steady state means Flink is keeping up. Growing queue depth means `RollingWindowProcess` or the Redis sink is a bottleneck.
+
+**Inspect Redis live:**
+
+```bash
+docker-compose exec redis redis-cli
+
+# List all engines with features
+KEYS engine:*:meta
+
+# Inspect a specific engine
+HGETALL engine:ENG-001:meta
+
+# Verify feature tensor size (should be 1320 bytes = 330 floats × 4 bytes)
+STRLEN engine:ENG-001:features
+
+# Check TTL (should be counting down from 3600)
+TTL engine:ENG-001:features
+```
+
+**Verify Parquet files in MinIO:**
+
+```bash
+# Install mc (MinIO client) or use the console at http://localhost:9002
+docker-compose exec minio mc ls local/aircraft-engine-data/features/
+```
+
+---
+
+## Exactly-Once Guarantees
+
+| Layer | Mechanism | Guarantee |
+|-------|-----------|-----------|
+| Producer → Solace broker | Persistent publisher with ACK window | At-least-once; broker persists before ACKing |
+| Solace broker durability | Durable queue, message spool | Survives broker restart |
+| Solace → Flink / Consumer | `AckMode.ON_CHECKPOINT` / manual ACK | At-least-once delivery; messages re-delivered on failure |
+| Flink internal state | Checkpoint-aligned barriers (Chandy-Lamport algorithm) | Exactly-once state |
+| Flink → Redis | At-least-once (Redis has no transactional exactly-once) | Idempotent overwrites |
+| Flink → S3 Parquet | Files flushed on checkpoint completion | Exactly-once files |
+
+**Why Redis at-least-once is acceptable here:** The worst case is a duplicate write of the same feature vector for the same engine cycle. The inference service always reads the latest value from `engine:{id}:features` (not an accumulation), so a duplicate write just overwrites with identical data — idempotent. The `last_cycle` guard in `RollingWindowFunction` prevents duplicate `FeatureVector` emission for the same cycle, making the Redis overwrite semantically correct.
+
+---
+
 ## Scaling
 
 | Parameter | Development | Production |
@@ -1475,43 +1494,43 @@ For a fleet of 1,000 aircraft sending one cycle every 10 seconds: ~100 events/se
 
 ## Troubleshooting
 
-**Flink job fails at startup (ClassNotFoundException or NoSuchMethodError):**
+**PyFlink job fails with `ModuleNotFoundError`:**
 
-Check that `flink-streaming-java` and `flink-clients` are `<scope>provided</scope>` in `pom.xml`. If they're bundled in the fat JAR, they conflict with the Flink cluster's own runtime JARs. Run `jar tf target/streaming-pipeline-1.0.0.jar | grep flink-streaming` — if you see it there, the scope is wrong.
+Ensure the `streaming/` directory is on the PyFlink search path via `-pyfs streaming/` in the `flink run` command. For Docker-based clusters, mount the Python source into each TaskManager container or package it into a ZIP via `--pyArchives`.
 
 **Consumer sessions not showing in Solace Manager:**
 
-The Flink source subtasks haven't bound to the queue yet. Check that the Flink job started successfully (`/jobs` endpoint on the JobManager REST API). Also verify that the Solace queue exists and the subscription (`aircraft/engine/*/telemetry/cycle`) is attached — if the queue wasn't provisioned before the Flink source tried to bind, the bind fails silently.
+The Flink source subtasks haven't bound to the queue yet. Check that the Flink job started successfully (`/jobs` endpoint on the JobManager REST API). Verify that the Solace queue exists and the subscription (`aircraft/engine/*/telemetry/cycle`) is attached — if the queue wasn't provisioned before the source tried to bind, the bind fails silently.
 
 **Features not appearing in Redis:**
 
-First verify the Flink job is emitting `FeatureVector` records by checking the operator throughput in the Web UI. If `RollingWindowFunction` shows output records > 0, the RedisSink is the issue. Run `redis-cli -h localhost -p 6379 PING` from within the Docker network to verify connectivity. Inside docker-compose, use `redis` as the hostname (not `localhost`).
+First verify the pipeline is emitting `FeatureVector` records by adding `print(fv)` inside `RollingWindowProcess.process_element`. If records are emitted, check Redis connectivity: `redis-cli -h localhost -p 6379 PING`. Inside docker-compose, use `redis` as the hostname (not `localhost`).
 
 **Queue depth growing (Flink falling behind):**
 
-Check Flink's backpressure indicators in the Web UI. If `RollingWindowFunction` is backpressured (yellow/red), the bottleneck is state access — enable RocksDB's block cache tuning or reduce parallelism overhead. If `RedisSink` is backpressured, increase Redis connection pool size or switch to a Redis Cluster.
+Check Flink's backpressure indicators in the Web UI. If `RollingWindowProcess` is backpressured (yellow/red), the bottleneck is state access — enable RocksDB's block cache tuning or reduce parallelism overhead. If the Redis sink is backpressured, increase Redis connection pool size or switch to a Redis Cluster.
 
 **Watermark not advancing:**
 
-Usually caused by an idle Solace consumer session (no messages arriving on one partition). Check `withIdleness(60s)` is set in `TelemetryPipeline.java`. If the producer is running but some partitions have no engines assigned to them, those sessions are idle — `withIdleness` resolves this.
+Usually caused by an idle Solace consumer session (no messages arriving on one partition). Check that `with_idleness(Duration.of_seconds(60))` is set in the `WatermarkStrategy`. If the producer is running but some partitions have no engines assigned, those sessions are idle — `with_idleness` resolves this.
 
 **Solace SEMP provisioning fails (409 Conflict):**
 
-The queue already exists. Either delete it first or make the SEMP calls idempotent by adding `"accessType":"exclusive"` and catching 400 errors. For CI/CD, use the `--ifNotExists` pattern in the SEMP script.
+The queue already exists. Either delete it first or make the SEMP calls idempotent by catching 400 errors. For CI/CD, check for existence before creating.
 
 ---
 
 ## Implementation Checklist
 
 - [ ] Export scaler parameters: `python scripts/export_scaler_params.py`
-- [ ] `mvn clean package -DskipTests` — fat JAR builds without errors
+- [ ] `uv pip install -r streaming/requirements.txt` — all dependencies install cleanly
 - [ ] `docker-compose up -d` — all services healthy
-- [ ] Run queue provisioning script (`provision_solace_queues.sh`)
+- [ ] Run queue provisioning script (`./scripts/provision_solace_queues.sh`)
 - [ ] Verify queue + subscription in Solace Manager UI
 - [ ] Create MinIO bucket `aircraft-engine-data`
-- [ ] Upload JAR and submit Flink job
-- [ ] Flink Web UI shows job RUNNING, all 3 operators green
-- [ ] Run producer: emits events, no ACK errors in logs
+- [ ] Start pipeline (PyFlink or standalone consumer)
+- [ ] Flink Web UI shows job RUNNING, all operators green (PyFlink mode)
+- [ ] Run producer: `python -m streaming.producer.telemetry_producer` — no ACK errors
 - [ ] Solace Manager shows queue depth approaching 0
 - [ ] `redis-cli KEYS "engine:*:meta"` returns engine IDs
 - [ ] `redis-cli STRLEN engine:ENG-001:features` returns 1320
@@ -1522,10 +1541,10 @@ The queue already exists. Either delete it first or make the SEMP calls idempote
 
 ## What's Next
 
-**Schema evolution.** When you add sensors or change the JSON structure, update the `EngineEvent` POJO to handle both old and new message shapes (Jackson's `@JsonAnySetter` or `Optional` fields). Register the new schema in Solace's AsyncAPI catalog. Flink reads both old and new messages without restarting.
+**Schema evolution.** When you add sensors or change the JSON structure, update the `EngineEvent` dataclass and `SENSOR_NAMES` list. `NormalizationFunction` reads the scaler CSV — re-export it after adding sensors. The consumer handles both old and new messages by using `.get(name, 0.0)` on the sensors dict.
 
-**Dead-letter handling.** Add a Flink side output in `RollingWindowFunction` that emits events failing validation (missing sensors, out-of-range values) to a Solace dead-letter queue (`aircraft/engine/dlt/validation-failure`). A separate consumer reads the DLT and writes to a monitoring dashboard or triggers an alert.
+**Dead-letter handling.** Wrap the consumer loop's `except` block to publish failed messages to a Solace dead-letter queue (`aircraft/engine/dlt/validation-failure`). A separate Python consumer reads the DLT and writes to a monitoring dashboard or triggers an alert.
 
-**Online retraining trigger.** Add a `KeyedProcessFunction` downstream of `RedisSink` that tracks a running average of predicted vs. true RUL per engine (if ground truth flows back via a separate Solace topic). When drift exceeds a threshold, emit a trigger event to a retraining queue, which kicks off a new GRU training run via the MLflow API.
+**Online retraining trigger.** Add logic inside `RollingWindowFunction` that tracks a running average of predicted vs. true RUL per engine (if ground truth flows back via a separate Solace topic). When drift exceeds a threshold, call the MLflow REST API to trigger a new GRU training run.
 
-**Multi-dataset support.** For FD002/FD004 (6 operating conditions), the `NormalizationFunction` must be condition-aware. Load the KMeans model and per-condition scalers via the Flink distributed cache alongside `scaler_params.csv`. Apply `kmeans.predict([os1, os2, os3])` per event, then select the correct scaler index. The `RollingWindowFunction` is unchanged.
+**Multi-dataset support.** For FD002/FD004 (6 operating conditions), make `NormalizationFunction` condition-aware. Load the KMeans model from `artifacts/` and per-condition scalers. Apply `kmeans.predict([[os1, os2, os3]])` per event, then select the correct scaler. `RollingWindowFunction` is unchanged.
