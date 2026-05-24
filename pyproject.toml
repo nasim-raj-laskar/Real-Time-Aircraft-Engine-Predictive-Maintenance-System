@@ -26,16 +26,22 @@ dependencies = [
     "joblib>=1.5.3",
     "prometheus-client>=0.25.0",
     "redis>=7.4.0",
-    "solace-pubsubplus>=1.11.0",
-    "apache-flink>=1.9.3",
 ]
 
 [dependency-groups]
 training = [
     "ipykernel>=7.2.0",
     "seaborn>=0.13.2",
-    "xgboost>=3.2.0",
     "evidently>=0.7.21",
     "psycopg2-binary>=2.9.12",
     "schedule>=1.2.2",
+]
+
+streaming = [
+    "redis>=7.4.0",
+    "pyarrow>=4.0.0,<24",
+    "boto3>=1.43.2",
+    "numpy>=2.4.4",
+    "solace-pubsubplus>=1.11.0",  
+    "apache-flink>=1.9.3"  
 ]

@@ -1,12 +1,16 @@
 """
-Telemetry producer — replays C-MAPSS FD001 rows as EngineEvent JSON.
+Telemetry producer — streams EngineEvent JSON continuously.
 
 Default mode: pushes events directly into a Python queue (no broker needed).
 Set SOLACE_HOST env var to publish to a real Solace PubSub+ broker instead.
 
 Usage:
     python -m streaming.producer.telemetry_producer
-    python -m streaming.producer.telemetry_producer --dataset Dataset/train_FD001.txt --throttle 0
+    python -m streaming.producer.telemetry_producer --dataset Dataset/train_FD001.txt --throttle 50
+    python -m streaming.producer.telemetry_producer --throttle 0   # max throughput
+
+The producer loops the dataset indefinitely, adding small random noise each
+pass so sensor values drift naturally over time — simulating real telemetry.
 """
 
 import argparse
@@ -44,64 +48,77 @@ def _build_payload(parts: list) -> dict:
     }
 
 
+# Small noise scale applied each loop pass so values drift naturally
+_NOISE_SCALE = 0.005
+
+
 def run_producer(
     dataset_path: str = "Dataset/train_FD001.txt",
-    throttle_ms: int = 1,
+    throttle_ms: int = 50,
     target_queue: queue.Queue = None,
-) -> int:
+) -> None:
     """
-    Replay FD001 rows as EngineEvent JSON.
+    Stream FD001 rows as EngineEvent JSON — loops forever.
+
+    Each pass through the dataset adds tiny Gaussian noise so sensor
+    values drift naturally, simulating real continuous telemetry.
+    Press Ctrl-C to stop.
 
     Args:
         dataset_path: Path to raw FD001 text file.
-        throttle_ms:  Sleep between publishes (0 = max throughput).
+        throttle_ms:  Sleep between publishes in ms (default 50 = 20 events/s).
         target_queue: Queue to push into. Defaults to module-level _local_queue.
-
-    Returns:
-        Number of events emitted.
     """
     q = target_queue if target_queue is not None else _local_queue
-    lines = Path(dataset_path).read_text().splitlines()
-    emitted = 0
+    lines = [l for l in Path(dataset_path).read_text().splitlines() if len(l.strip().split()) >= 26]
 
     solace_host = os.getenv("SOLACE_HOST")
-    publisher = None
+    publisher = _build_solace_publisher(solace_host) if solace_host else None
 
-    if solace_host:
-        publisher = _build_solace_publisher(solace_host)
+    emitted = 0
+    loop = 0
+    rng = __import__("random")
 
-    print(f"[producer] Replaying {len(lines)} cycles from {dataset_path}")
+    print(f"[producer] Streaming {len(lines)} cycles/pass from {dataset_path} (loops forever, Ctrl-C to stop)")
 
-    for line in lines:
-        parts = line.strip().split()
-        if len(parts) < 26:
-            continue
+    try:
+        while True:
+            loop += 1
+            noise = _NOISE_SCALE * (loop - 1)  # drift grows slightly each pass
 
-        payload = _build_payload(parts)
-        raw = json.dumps(payload)
+            for line in lines:
+                parts = line.strip().split()
+                payload = _build_payload(parts)
 
+                # Add small Gaussian noise to each sensor value
+                for k in payload["sensors"]:
+                    payload["sensors"][k] += rng.gauss(0, noise) if noise > 0 else 0.0
+
+                raw = json.dumps(payload).encode()
+
+                if publisher:
+                    _solace_publish(publisher, payload["engine_id"], raw.decode())
+                else:
+                    try:
+                        q.put_nowait(raw)
+                    except queue.Full:
+                        q.put(raw)  # block until space — natural back-pressure
+
+                emitted += 1
+
+                if throttle_ms > 0:
+                    time.sleep(throttle_ms / 1000)
+
+                if emitted % 1_000 == 0:
+                    print(f"[producer] Emitted {emitted} events (pass {loop})")
+
+            print(f"[producer] Pass {loop} complete — starting pass {loop + 1}")
+
+    except KeyboardInterrupt:
+        print(f"\n[producer] Stopped. Emitted {emitted} total events across {loop} passes.")
+    finally:
         if publisher:
-            _solace_publish(publisher, payload["engine_id"], raw)
-        else:
-            try:
-                q.put_nowait(raw.encode())
-            except queue.Full:
-                # Back-pressure: wait until space is available
-                q.put(raw.encode())
-
-        emitted += 1
-
-        if throttle_ms > 0:
-            time.sleep(throttle_ms / 1000)
-
-        if emitted % 1_000 == 0:
-            print(f"[producer] Emitted {emitted} events")
-
-    if publisher:
-        _solace_disconnect(publisher)
-
-    print(f"[producer] Done. Emitted {emitted} total events.")
-    return emitted
+            _solace_disconnect(publisher)
 
 
 # ── Optional Solace integration ───────────────────────────────────────────────
@@ -146,6 +163,6 @@ def _solace_disconnect(publisher_tuple):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default="Dataset/train_FD001.txt")
-    parser.add_argument("--throttle", type=int, default=1, help="ms between events (0=max)")
+    parser.add_argument("--throttle", type=int, default=50, help="ms between events (default 50 = 20 events/s)")
     args = parser.parse_args()
     run_producer(dataset_path=args.dataset, throttle_ms=args.throttle)
