@@ -32,14 +32,14 @@ COPY --from=builder /app/.venv ./.venv
 
 # Copy application code and configs
 COPY src/ ./src/
+COPY streaming/ ./streaming/
 COPY config/ ./config/
 COPY artifacts/ ./artifacts/
 COPY monitoring/ ./monitoring/
-COPY reports/ ./reports/
 COPY main.py ./
 COPY app.py ./
 
-RUN mkdir -p logs
+RUN mkdir -p logs reports/drift
 
 EXPOSE 8000
 
