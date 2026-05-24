@@ -8,3 +8,4 @@ __pycache__/
 creds.txt
 accessKeys.csv
 logs/
+solace.env
