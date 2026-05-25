@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir --upgrade pip uv
 
 WORKDIR /app
 
-# ── Install dependencies ──────────────────────────────────────────────────────
+#Install dependencies
 # Step 1: core streaming deps
 RUN pip install --no-cache-dir boto3 pyarrow redis solace-pubsubplus numpy
 
@@ -38,7 +38,7 @@ RUN echo "redis>=7.4.0" > /tmp/beam_override.txt \
 # Install with --no-deps to skip the conflicting transitive resolver.
 RUN uv pip install "apache-flink==2.2.1" --no-deps
 
-# ── Application code ──────────────────────────────────────────────────────────
+#Application code 
 COPY streaming/ ./streaming/
 COPY src/ ./src/
 COPY config/ ./config/
