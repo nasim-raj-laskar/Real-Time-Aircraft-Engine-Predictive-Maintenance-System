@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 import time
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from src.inference.loader import load_artifacts
-from src.inference.routes import router, init_router
+from src.inference.routes import router, init_router, _get_feature_store
 from src.inference.predictor import InferenceError
+from src.inference.ws import ws_router, init_ws
 from src.inference.metrics import (
     prediction_latency_seconds,
     model_load_time_seconds,
@@ -21,7 +22,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # update when frontend is deployed
+    allow_origins=["*"],  # tightened per-origin once frontend domain is known
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -68,7 +69,10 @@ async def startup():
     load_time = time.time() - start_time
     model_load_time_seconds.set(load_time)
     init_router(model, scaler, config)
+    # Share the same feature store instance with the WS layer
+    init_ws(model, scaler, config, _get_feature_store())
     print(f"✓ Model loaded in {load_time:.2f}s")
 
 
 app.include_router(router)
+app.include_router(ws_router)
