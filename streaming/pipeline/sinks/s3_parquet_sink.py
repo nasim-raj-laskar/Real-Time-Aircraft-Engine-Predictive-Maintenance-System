@@ -37,7 +37,7 @@ class S3ParquetSink:
         aws_key: str = None,
         aws_secret: str = None,
     ):
-        self._bucket = bucket or os.getenv("S3_BUCKET", "aircraft-engine-data")
+        self._bucket = bucket or os.getenv("AWS_S3_BUCKET") or os.getenv("S3_BUCKET", "aircraft-engine-data")
         self._prefix = prefix
         self._buffer: List[FeatureVector] = []
         self._part = 0

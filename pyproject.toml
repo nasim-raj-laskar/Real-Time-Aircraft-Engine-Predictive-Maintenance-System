@@ -43,6 +43,8 @@ streaming = [
     "pyarrow>=4.0.0,<24",
     "boto3>=1.43.2",
     "numpy>=2.4.4",
-    "solace-pubsubplus>=1.11.0",  
-    "apache-flink>=1.9.3"  
+    "solace-pubsubplus>=1.11.0",
+    # apache-flink is installed separately via scripts/install_flink.sh
+    # because its transitive deps (apache-beam -> redis<5) conflict with
+    # the project's redis>=7.4.0. Use: uv run --no-deps pip install apache-flink==1.19.3
 ]

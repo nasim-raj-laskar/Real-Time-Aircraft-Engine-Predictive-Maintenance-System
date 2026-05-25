@@ -1,0 +1,47 @@
+# Streaming services image — producer + standalone consumer
+# Uses the official Flink image so JARs are pre-installed at /opt/flink
+FROM flink:2.0-scala_2.12-java17
+
+# Install Python 3.12 from deadsnakes PPA (Ubuntu 22.04 Jammy only ships 3.10)
+# gcc is needed to build some Python packages from source
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common curl gcc g++ \
+    && add-apt-repository ppa:deadsnakes/ppa -y \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+       python3.12 python3.12-dev python3.12-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create venv with Python 3.12 and install pip + uv into it
+RUN python3.12 -m venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    FLINK_HOME=/opt/flink
+
+RUN pip install --no-cache-dir --upgrade pip uv
+
+WORKDIR /app
+
+#Install dependencies
+# Step 1: core streaming deps
+RUN pip install --no-cache-dir boto3 pyarrow redis solace-pubsubplus numpy
+
+# Step 2: apache-beam (required by PyFlink's Python worker pool).
+# Its transitive dep declares redis<5 which conflicts with redis>=7.4.0,
+# so we install it with a constraints override.
+RUN echo "redis>=7.4.0" > /tmp/beam_override.txt \
+    && uv pip install "apache-beam==2.61.0" --override /tmp/beam_override.txt \
+    && rm /tmp/beam_override.txt
+
+# Step 3: apache-flink 2.2.1 has a pre-built cp312 wheel — no gcc needed.
+# Install with --no-deps to skip the conflicting transitive resolver.
+RUN uv pip install "apache-flink==2.2.1" --no-deps
+
+#Application code 
+COPY streaming/ ./streaming/
+COPY src/ ./src/
+COPY config/ ./config/
+COPY artifacts/data_ingestion/ ./artifacts/data_ingestion/
+
+RUN mkdir -p logs
