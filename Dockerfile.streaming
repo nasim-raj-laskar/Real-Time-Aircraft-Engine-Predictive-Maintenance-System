@@ -42,5 +42,6 @@ RUN uv pip install "apache-flink==2.2.1" --no-deps
 COPY streaming/ ./streaming/
 COPY src/ ./src/
 COPY config/ ./config/
+COPY artifacts/data_ingestion/ ./artifacts/data_ingestion/
 
 RUN mkdir -p logs

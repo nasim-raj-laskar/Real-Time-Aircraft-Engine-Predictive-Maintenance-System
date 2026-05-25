@@ -126,7 +126,7 @@ services:
       dockerfile: Dockerfile.streaming
     container_name: aircraft-producer
     env_file: .env
-    command: python3 -m streaming.producer.telemetry_producer --throttle 50
+    command: python3 -m streaming.producer.telemetry_producer --dataset artifacts/data_ingestion/data/train_FD001.txt --throttle 50
     environment:
       REDIS_URL: redis://redis:6379/0
       # Uncomment to publish to Solace instead of Redis Streams:
@@ -134,8 +134,6 @@ services:
       # SOLACE_VPN: default
       # SOLACE_USERNAME: admin
       # SOLACE_PASSWORD: admin
-    volumes:
-      - ./Dataset:/app/Dataset:ro
     depends_on:
       redis:
         condition: service_healthy
