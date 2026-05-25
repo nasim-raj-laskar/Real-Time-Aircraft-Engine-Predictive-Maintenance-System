@@ -15,13 +15,12 @@ import json
 import os
 from datetime import datetime, timezone
 from typing import Optional
+from functools import partial
 
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.routing import APIRouter
 
 from src.inference.feature_store import RedisFeatureStore
-from src.inference.predictor import run_raw_prediction
-from src.entity.config_entity import RawSensorData
 
 ws_router = APIRouter()
 
@@ -45,30 +44,57 @@ def init_ws(model, scaler, config: dict, feature_store: RedisFeatureStore):
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _predict_engine(engine_id: str) -> Optional[dict]:
-    """Run inference for one engine from its Redis feature tensor. Returns None on any error."""
+def _predict_all_engines(engine_ids: list) -> list:
+    """Single batched TF forward pass for all engines — O(1) instead of O(n)."""
     if _feature_store is None or _model is None:
-        return None
-    window = _feature_store.get_features(engine_id)
-    if window is None:
-        return None
-    features = list(_config.get("features", []))
-    sensor_data = [
-        {features[j]: float(window[i, j]) for j in range(len(features))}
-        for i in range(window.shape[0])
-    ]
-    try:
-        result = run_raw_prediction(
-            RawSensorData(engine_id=engine_id, sensor_data=sensor_data),
-            _model, _scaler, _config,
-        )
-        return result.model_dump()
-    except Exception:
-        return None
+        return []
+
+    windows, valid_ids = [], []
+    for eid in engine_ids:
+        w = _feature_store.get_features(eid)
+        if w is not None:
+            windows.append(w)
+            valid_ids.append(eid)
+
+    if not windows:
+        return []
+
+    import numpy as np
+    X = np.stack(windows, axis=0).astype(np.float32)  # (N, 30, 11)
+    preds = _model(X, training=False).numpy()[:, 0]   # (N,)
+
+    rul_clip = _config.get("rul_clip", 125)
+    results = []
+    now = datetime.now(timezone.utc).isoformat()
+    version = _config.get("model_version", "unknown")
+
+    for eid, rul_norm in zip(valid_ids, preds):
+        rul = max(0.0, float(rul_norm) * rul_clip)
+        risk = round(max(0.0, min(1.0, 1.0 - (rul / rul_clip))), 3)
+        if risk >= 0.8:   risk_level = "CRITICAL"
+        elif risk >= 0.6: risk_level = "HIGH"
+        elif risk >= 0.3: risk_level = "MEDIUM"
+        else:             risk_level = "LOW"
+        results.append({
+            "engine_id": eid,
+            "remaining_cycles": int(round(rul)),
+            "failure_risk": risk,
+            "risk_level": risk_level,
+            "confidence": 1.0,
+            "timestamp": now,
+            "model_version": version,
+        })
+    return results
 
 
 async def _send(ws: WebSocket, payload: dict):
     await ws.send_text(json.dumps(payload))
+
+
+async def _run_batch_async(engine_ids: list) -> list:
+    """Run _predict_all_engines in a thread pool to avoid blocking the event loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, partial(_predict_all_engines, engine_ids))
 
 
 # ── /ws/telemetry ─────────────────────────────────────────────────────────────
@@ -144,11 +170,7 @@ async def ws_predictions(websocket: WebSocket):
                 continue
 
             engine_ids = _feature_store.list_active_engines()
-            predictions = []
-            for eid in engine_ids:
-                result = _predict_engine(eid)
-                if result:
-                    predictions.append(result)
+            predictions = await _run_batch_async(engine_ids)
 
             # Sort by failure_risk descending so frontend gets critical engines first
             predictions.sort(key=lambda x: x.get("failure_risk", 0), reverse=True)
@@ -197,11 +219,11 @@ async def ws_alerts(websocket: WebSocket):
                 continue
 
             engine_ids = _feature_store.list_active_engines()
-            alerts = []
-            for eid in engine_ids:
-                result = _predict_engine(eid)
-                if result and RISK_RANK.get(result.get("risk_level", "LOW"), 0) >= threshold:
-                    alerts.append(result)
+            all_results = await _run_batch_async(engine_ids)
+            alerts = [
+                r for r in all_results
+                if RISK_RANK.get(r.get("risk_level", "LOW"), 0) >= threshold
+            ]
 
             alerts.sort(key=lambda x: x.get("failure_risk", 0), reverse=True)
 
