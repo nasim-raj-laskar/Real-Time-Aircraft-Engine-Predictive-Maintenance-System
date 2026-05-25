@@ -1,150 +1,232 @@
 services:
+
+  # ── Inference API ────────────────────────────────────────────────────────────
   inference-api:
     build:
       context: .
       dockerfile: Dockerfile
-
     container_name: aircraft-engine-api
-
-    env_file:
-      - .env
-
+    env_file: .env
     ports:
       - "8000:8000"
-
     volumes:
       - ./artifacts:/app/artifacts:ro
       - ./logs:/app/logs
-
     environment:
-      MODEL_PATH: /app/artifacts/model_trainer/model.keras
-      SCALER_PATH: /app/artifacts/data_transformation/scaler.pkl
       REDIS_URL: redis://redis:6379/0
-
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-
+      start_period: 15s
     restart: unless-stopped
-
     depends_on:
       redis:
         condition: service_healthy
-
     networks:
       - aircraft-network
 
+  # ── Redis (online feature store + stream transport) ──────────────────────────
   redis:
     image: redis:7-alpine
-
     container_name: aircraft-redis
-
     ports:
       - "6379:6379"
-
     volumes:
       - redis-data:/data
-
     command: redis-server --appendonly yes
-
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-
     restart: unless-stopped
-
     networks:
       - aircraft-network
 
+  # ── Solace PubSub+ (event broker) ────────────────────────────────────────────
+  solace:
+    image: solace/solace-pubsub-standard:latest
+    container_name: aircraft-solace
+    hostname: solace
+    ports:
+      - "8080:8080"    # Solace Manager UI
+      - "55555:55555"  # SMF (Flink connector / Python API)
+      - "1883:1883"    # MQTT
+      - "9000:9000"    # REST messaging
+    environment:
+      username_admin_globalaccesslevel: admin
+      username_admin_password: admin
+      system_scaling_maxconnectioncount: "1000"
+    shm_size: "2g"
+    ulimits:
+      core: -1
+      nofile:
+        soft: 2448
+        hard: 38048
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/SEMP/v2/config"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - aircraft-network
+
+  # ── Flink JobManager ─────────────────────────────────────────────────────────
+  flink-jobmanager:
+    image: flink:2.0-scala_2.12-java17
+    container_name: aircraft-flink-jobmanager
+    ports:
+      - "8082:8081"    # Flink Web UI
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        execution.checkpointing.interval: 30000
+        state.backend: hashmap
+        python.executable: python3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/overview"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - aircraft-network
+
+  # ── Flink TaskManager ────────────────────────────────────────────────────────
+  flink-taskmanager:
+    image: flink:2.0-scala_2.12-java17
+    container_name: aircraft-flink-taskmanager
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        taskmanager.memory.process.size: 2g
+        state.backend: hashmap
+        python.executable: python3
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aircraft-network
+
+  # ── Telemetry Producer ───────────────────────────────────────────────────────
+  # Streams FD001 rows into Redis Streams (default) or Solace (if SOLACE_HOST set)
+  telemetry-producer:
+    build:
+      context: .
+      dockerfile: Dockerfile.streaming
+    container_name: aircraft-producer
+    env_file: .env
+    command: python3 -m streaming.producer.telemetry_producer --throttle 50
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      # Uncomment to publish to Solace instead of Redis Streams:
+      # SOLACE_HOST: tcp://solace:55555
+      # SOLACE_VPN: default
+      # SOLACE_USERNAME: admin
+      # SOLACE_PASSWORD: admin
+    volumes:
+      - ./Dataset:/app/Dataset:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aircraft-network
+
+  # ── Standalone Consumer (Python pipeline — no Flink cluster needed) ──────────
+  # Reads from Redis Streams → normalize → rolling window → Redis feature store → S3
+  standalone-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.streaming
+    container_name: aircraft-consumer
+    env_file: .env
+    command: python3 -m streaming.pipeline.standalone_consumer --s3
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      S3_BUCKET: ${AWS_S3_BUCKET:-aircraft-engine-data}
+      FLUSH_EVERY: "500"
+      # Uncomment to consume from Solace instead of Redis Streams:
+      # SOLACE_HOST: tcp://solace:55555
+      # SOLACE_QUEUE_NAME: flink.feature.processor
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aircraft-network
+
+  # ── Monitoring ───────────────────────────────────────────────────────────────
   node-exporter:
     image: prom/node-exporter:latest
-
     container_name: aircraft-node-exporter
-
     ports:
       - "9100:9100"
-
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:ro
-
     command:
       - "--path.procfs=/host/proc"
       - "--path.sysfs=/host/sys"
       - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
-
     restart: unless-stopped
-
     networks:
       - aircraft-network
 
   redis-exporter:
     image: oliver006/redis_exporter:latest
-
     container_name: aircraft-redis-exporter
-
     ports:
       - "9121:9121"
-
     environment:
       REDIS_ADDR: redis://redis:6379
-
     depends_on:
       redis:
         condition: service_healthy
-
     restart: unless-stopped
-
     networks:
       - aircraft-network
 
   prometheus:
     image: prom/prometheus:latest
-
     container_name: aircraft-prometheus
-
     ports:
       - "9090:9090"
-
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/prometheus/alerting_rules.yml:/etc/prometheus/alerting_rules.yml:ro
-
     restart: unless-stopped
-
     networks:
       - aircraft-network
 
   grafana:
     image: grafana/grafana:latest
-
     container_name: aircraft-grafana
-
-    depends_on:
-      - prometheus
-
+    ports:
+      - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_PATHS_PROVISIONING: /etc/grafana/provisioning
-
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-
-    ports:
-      - "3000:3000"
-
+    depends_on:
+      - prometheus
     restart: unless-stopped
-
     networks:
       - aircraft-network
 

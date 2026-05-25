@@ -128,7 +128,7 @@ class S3CheckpointSink(SinkFunction):
     """Buffers FeatureVectors and flushes to S3 Parquet on finish() (per checkpoint)."""
 
     def open(self, runtime_context: RuntimeContext):
-        self._sink = S3ParquetSink()
+        self._sink = S3ParquetSink()  # reads AWS_S3_BUCKET / AWS_ACCESS_KEY_ID from env
         self._count = 0
 
     def invoke(self, fv: FeatureVector, context):
@@ -304,12 +304,58 @@ if __name__ == "__main__":
         override=False,
     )
 
-    parser = argparse.ArgumentParser(description="Aircraft Telemetry PyFlink Pipeline")
+    parser = argparse.ArgumentParser(
+        description="Aircraft Telemetry PyFlink Pipeline",
+        epilog=(
+            "NOTE: PyFlink requires a Flink binary distribution (FLINK_HOME) and "
+            "apache-beam to be installed. For local development without a Flink cluster, "
+            "use the standalone consumer instead:\n"
+            "  python -m streaming.pipeline.standalone_consumer"
+        ),
+    )
     parser.add_argument(
         "--local",
         action="store_true",
         help="Run in local mini-cluster mode (no RocksDB, parallelism=1)",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate pipeline components without starting the Flink JVM (no FLINK_HOME needed)",
+    )
     args = parser.parse_args()
 
-    build_pipeline(local=args.local)
+    if args.dry_run:
+        print("[dry-run] Validating pipeline components...")
+        # Validate all components can be instantiated without the Flink JVM
+        norm = NormalizationFunction(_SCALER_CSV)
+        from streaming.pipeline.functions.rolling_window import RollingWindowFunction as RWF
+        from streaming.model.engine_event import EngineEvent
+        import time as _time
+        wf = RWF(window_size=30)
+        # Feed 30 synthetic events through the pipeline
+        for i in range(30):
+            ev = EngineEvent(
+                engine_id="DRY-RUN-1",
+                cycle=i + 1,
+                event_time_ms=int(_time.time() * 1000),
+                sensors={s: float(i) for s in ["s2","s3","s4","s7","s9","s11","s12","s14","s17","s20","s21"]},
+            )
+            ev = norm.normalize(ev)
+            fv = wf.process(ev)
+        assert fv is not None, "RollingWindowFunction did not emit a FeatureVector"
+        assert len(fv.features) == 30 * 11, f"Expected 330 features, got {len(fv.features)}"
+        print(f"[dry-run] NormalizationFunction: OK")
+        print(f"[dry-run] RollingWindowFunction: OK — emitted FeatureVector for engine DRY-RUN-1")
+        print(f"[dry-run] FeatureVector shape: ({fv.window_size}, {fv.n_sensors}) = {len(fv.features)} floats")
+        print(f"[dry-run] Redis key: {fv.redis_feature_key}")
+        print("[dry-run] All pipeline components validated successfully.")
+        print("")
+        print("To run the full pipeline, ensure FLINK_HOME is set and run:")
+        print("  bash scripts/install_flink.sh   # one-time setup")
+        print("  FLINK_HOME=~/.local/flink-2.2.1 python -m streaming.pipeline.telemetry_pipeline --local")
+        print("")
+        print("For local development without Flink:")
+        print("  python -m streaming.pipeline.standalone_consumer")
+    else:
+        build_pipeline(local=args.local)
