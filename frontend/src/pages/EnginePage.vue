@@ -5,14 +5,12 @@ import DashboardLayout from '../layouts/DashboardLayout.vue'
 import RulGauge from '../components/charts/RulGauge.vue'
 import RiskBadge from '../components/ui/RiskBadge.vue'
 import { useEngineStore } from '../stores/engineStore'
-import { useWebSockets } from '../composables/useWebSockets'
 import { predictEngine } from '../services/api'
 import type { RiskLevel } from '../types'
 
 const route = useRoute()
 const router = useRouter()
 const store = useEngineStore()
-useWebSockets()
 
 const engineId = computed(() => route.params.id as string)
 const prediction = computed(() => store.predictions.get(engineId.value) ?? null)

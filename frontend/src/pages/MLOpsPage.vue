@@ -2,18 +2,16 @@
 import { onMounted } from 'vue'
 import DashboardLayout from '../layouts/DashboardLayout.vue'
 import { useEngineStore } from '../stores/engineStore'
-import { useWebSockets } from '../composables/useWebSockets'
 
 const store = useEngineStore()
-useWebSockets()
 onMounted(() => { store.fetchModelInfo() })
 
 const metrics = [
-  { label: 'Test RMSE',          value: '15.28 cy',  target: '< 20',   ok: true },
-  { label: 'NASA Score',         value: '444.6',     target: '< 2000', ok: true },
-  { label: 'Precision (Crit.)',  value: '95.4%',     target: '> 80%',  ok: true },
-  { label: 'Recall (Crit.)',     value: '84.0%',     target: '> 75%',  ok: true },
-  { label: 'F1-Score',           value: '0.894',     target: '> 0.80', ok: true },
+  { label: 'Test RMSE',          value: '26.15 cy', target: '< 20',   ok: false },
+  { label: 'NASA Score',         value: '2181.2',   target: '< 2000', ok: false },
+  { label: 'Precision (Crit.)',  value: '0.0%',     target: '> 80%',  ok: false },
+  { label: 'Recall (Crit.)',     value: '0.0%',     target: '> 75%',  ok: false },
+  { label: 'F1-Score',           value: '0.643',    target: '> 0.80', ok: false },
 ]
 </script>
 
@@ -41,7 +39,7 @@ const metrics = [
               </div>
               <div class="flex justify-between">
                 <span class="text-gray-500">Input Shape</span>
-                <span class="text-white font-mono">{{ store.modelInfo.input_shape.join(' × ') }}</span>
+                <span class="text-white font-mono">{{ store.modelInfo.input_shape.join(' x ') }}</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-gray-500">RUL Clip</span>
@@ -61,12 +59,12 @@ const metrics = [
           <h3 class="text-sm font-semibold text-gray-300 mb-3">Architecture</h3>
           <div class="space-y-1 text-xs font-mono">
             <div class="bg-bg rounded px-2 py-1 text-cyan-400">Input (batch, 30, 11)</div>
-            <div class="bg-bg rounded px-2 py-1 text-white">GRU 128 → Dropout 0.2</div>
-            <div class="bg-bg rounded px-2 py-1 text-white">GRU 64  → Dropout 0.2</div>
-            <div class="bg-bg rounded px-2 py-1 text-white">GRU 32  → Dropout 0.15</div>
+            <div class="bg-bg rounded px-2 py-1 text-white">GRU 128 -&gt; Dropout 0.2</div>
+            <div class="bg-bg rounded px-2 py-1 text-white">GRU 64  -&gt; Dropout 0.2</div>
+            <div class="bg-bg rounded px-2 py-1 text-white">GRU 32  -&gt; Dropout 0.15</div>
             <div class="bg-bg rounded px-2 py-1 text-white">Dense 32 (ReLU + L2)</div>
             <div class="bg-bg rounded px-2 py-1 text-white">Dense 16 (ReLU + L2)</div>
-            <div class="bg-bg rounded px-2 py-1 text-green-400">Output 1 (Sigmoid) → RUL ∈ [0,1]</div>
+            <div class="bg-bg rounded px-2 py-1 text-green-400">Output 1 (Sigmoid) -&gt; RUL in [0,1]</div>
           </div>
         </div>
       </div>
@@ -90,7 +88,7 @@ const metrics = [
                 <td class="text-right pr-6 text-white font-mono">{{ m.value }}</td>
                 <td class="text-right pr-6 text-gray-500">{{ m.target }}</td>
                 <td class="text-right">
-                  <span :class="m.ok ? 'text-green-400' : 'text-red-400'">{{ m.ok ? '✓' : '✗' }}</span>
+                  <span :class="m.ok ? 'text-green-400' : 'text-red-400'">{{ m.ok ? 'OK' : 'FAIL' }}</span>
                 </td>
               </tr>
             </tbody>

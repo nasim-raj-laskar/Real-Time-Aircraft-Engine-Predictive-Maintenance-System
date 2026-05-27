@@ -11,30 +11,30 @@ export function useWebSockets() {
 
   function connect() {
     const onMsg = (msg: WsMessage) => {
-      if (msg.type === 'predictions') engineStore.applyPredictions(msg.predictions)
-      if (msg.type === 'telemetry')   engineStore.applyTelemetry(msg.engines)
-      if (msg.type === 'alerts')      alertStore.applyAlerts(msg.alerts)
+      try {
+        if (msg.type === 'predictions') engineStore.applyPredictions(msg.predictions)
+        if (msg.type === 'telemetry')   engineStore.applyTelemetry(msg.engines)
+        if (msg.type === 'alerts')      alertStore.applyAlerts(msg.alerts)
+      } catch { /* ignore store errors */ }
     }
-    const onErr = () => { engineStore.wsConnected = false }
 
-    sockets.push(
-      createWs('/ws/predictions', onMsg, onErr),
-      createWs('/ws/telemetry',   onMsg, onErr),
-      createWs('/ws/alerts',      onMsg, onErr),
-    )
-
-    sockets.forEach(ws => {
-      ws.onopen = () => { engineStore.wsConnected = true }
+    const paths = ['/ws/predictions', '/ws/telemetry', '/ws/alerts']
+    paths.forEach(path => {
+      try {
+        const ws = createWs(path, onMsg)
+        ws.onopen  = () => { engineStore.wsConnected = true }
+        ws.onclose = () => { engineStore.wsConnected = false }
+        ws.onerror = () => { /* swallow — onclose fires next */ }
+        sockets.push(ws)
+      } catch { /* ignore connection errors */ }
     })
   }
 
   function disconnect() {
-    sockets.forEach(ws => ws.close())
+    sockets.forEach(ws => { try { ws.close() } catch { /* ignore */ } })
     sockets.length = 0
   }
 
   onMounted(connect)
   onUnmounted(disconnect)
-
-  return { connect, disconnect }
 }

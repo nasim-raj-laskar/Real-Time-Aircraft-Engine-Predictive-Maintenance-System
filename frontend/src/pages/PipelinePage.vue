@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import DashboardLayout from '../layouts/DashboardLayout.vue'
-import { useWebSockets } from '../composables/useWebSockets'
 import { useEngineStore } from '../stores/engineStore'
 
-useWebSockets()
 const store = useEngineStore()
 
 const services = [

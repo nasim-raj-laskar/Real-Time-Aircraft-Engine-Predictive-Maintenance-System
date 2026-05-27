@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
 import DashboardLayout from '../layouts/DashboardLayout.vue'
 import StatCard from '../components/cards/StatCard.vue'
 import EngineTable from '../components/cards/EngineTable.vue'
@@ -7,15 +6,8 @@ import AlertsPanel from '../components/cards/AlertsPanel.vue'
 import RiskDistributionChart from '../components/charts/RiskDistributionChart.vue'
 import RulBarChart from '../components/charts/RulBarChart.vue'
 import { useEngineStore } from '../stores/engineStore'
-import { useWebSockets } from '../composables/useWebSockets'
 
 const store = useEngineStore()
-useWebSockets()
-
-onMounted(() => {
-  store.fetchHealth()
-  store.fetchModelInfo()
-})
 </script>
 
 <template>
