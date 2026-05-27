@@ -7,6 +7,9 @@ __pycache__/
 *.egg-info/
 .venv/
 
+# Frontend build artifacts (built inside Docker)
+frontend/node_modules/
+frontend/dist/
 
 Dataset/
 logs/
@@ -14,7 +17,6 @@ notebook/
 assets/
 docs/
 reports/
-
 
 # Git
 .git/
