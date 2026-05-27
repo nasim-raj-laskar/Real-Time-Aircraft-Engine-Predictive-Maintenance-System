@@ -27,31 +27,31 @@ const metrics = [
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="bg-card border border-border rounded-lg p-4">
           <h3 class="text-sm font-semibold text-gray-300 mb-3">Active Model</h3>
-          <template v-if="store.modelInfo">
+          <template v-if="store.modelInfo && store.modelInfo.sensors">
             <div class="space-y-2 text-xs">
               <div class="flex justify-between">
                 <span class="text-gray-500">Type</span>
-                <span class="text-white font-mono">{{ store.modelInfo.model_type }}</span>
+                <span class="text-white font-mono">{{ store.modelInfo.model_type ?? '-' }}</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-gray-500">Version</span>
-                <span class="text-cyan-400 font-mono">{{ store.modelInfo.model_version }}</span>
+                <span class="text-cyan-400 font-mono">{{ store.modelInfo.model_version ?? '-' }}</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-gray-500">Input Shape</span>
-                <span class="text-white font-mono">{{ store.modelInfo.input_shape.join(' x ') }}</span>
+                <span class="text-white font-mono">{{ (store.modelInfo.input_shape ?? []).join(' x ') }}</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-gray-500">RUL Clip</span>
-                <span class="text-white font-mono">{{ store.modelInfo.rul_clip }} cycles</span>
+                <span class="text-white font-mono">{{ store.modelInfo.rul_clip ?? '-' }} cycles</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-gray-500">Sensors</span>
-                <span class="text-white font-mono">{{ store.modelInfo.sensors.length }}</span>
+                <span class="text-white font-mono">{{ (store.modelInfo.sensors ?? []).length }}</span>
               </div>
             </div>
           </template>
-          <p v-else class="text-xs text-gray-600">Loading model info…</p>
+          <p v-else class="text-xs text-gray-600">Loading model info...</p>
         </div>
 
         <!-- Architecture -->

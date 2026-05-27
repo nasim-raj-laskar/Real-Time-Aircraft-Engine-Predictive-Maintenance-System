@@ -25,13 +25,13 @@ export interface EngineMeta {
 }
 
 export interface ModelInfo {
-  model_type: string
-  input_shape: number[]
-  window_size: number
-  sensors: string[]
-  rul_clip: number
-  model_version: string
-  trained_on: string
+  model_type?: string
+  input_shape?: number[]
+  window_size?: number
+  sensors?: string[]
+  rul_clip?: number
+  model_version?: string
+  trained_on?: string
 }
 
 export interface HealthStatus {
