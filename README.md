@@ -3,24 +3,26 @@
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
 [![TensorFlow](https://img.shields.io/badge/TensorFlow-2.15-orange.svg)](https://www.tensorflow.org/)
 [![MLflow](https://img.shields.io/badge/MLflow-Tracking-green.svg)](https://mlflow.org/)
+[![Vue](https://img.shields.io/badge/Vue-3.5-42b883.svg)](https://vuejs.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A production-ready Machine Learning system that predicts aircraft engine **Remaining Useful Life (RUL)** using deep learning on NASA's C-MAPSS turbofan engine dataset.
+A production-ready Machine Learning system that predicts aircraft engine **Remaining Useful Life (RUL)** using deep learning on NASA's C-MAPSS turbofan engine dataset — with a full real-time streaming pipeline, containerized deployment, and a live operations dashboard.
+
+---
 
 ## 🎯 Project Overview
 
-This system demonstrates end-to-end MLOps practices for predictive maintenance:
-
-- ✅ **Automated ML Pipeline** - 7-stage modular pipeline from data ingestion to model deployment
-- ✅ **Deep Learning** - 3-layer GRU model with 95.4% precision on critical engine detection
-- ✅ **MLflow Integration** - Experiment tracking, model registry, and versioning
-- ✅ **S3 Data Lake** - Medallion architecture (Bronze/Silver/Gold layers)
-- ✅ **Model Registry** - Automated promotion with quality gates
-- ✅ **FastAPI Inference** - Production-ready REST API with health checks
-- ✅ **Prometheus Metrics** - Real-time performance monitoring
-- ✅ **Drift Detection** - Evidently AI for data quality monitoring
-- ✅ **Docker Deployment** - Containerized services with docker-compose
-- 🔮 **Streaming Ready** - Designed for Kafka + Flink real-time inference
+- ✅ **Automated ML Pipeline** — 7-stage modular pipeline from data ingestion to model registry
+- ✅ **Deep Learning** — 3-layer GRU model trained on NASA C-MAPSS FD001
+- ✅ **MLflow Integration** — Experiment tracking, model registry, versioning on DagsHub
+- ✅ **S3 Data Lake** — Medallion architecture (Bronze / Silver / Gold layers)
+- ✅ **FastAPI Inference** — REST + WebSocket API with Prometheus metrics
+- ✅ **Streaming Pipeline** — Solace PubSub+ producer, Redis Streams transport, standalone consumer, PyFlink entry point
+- ✅ **Redis Feature Store** — Online feature tensors for sub-millisecond inference reads
+- ✅ **Drift Detection** — Evidently AI HTML reports
+- ✅ **Monitoring Stack** — Prometheus + Grafana + Node Exporter + Redis Exporter
+- ✅ **Vue 3 Dashboard** — Real-time operations UI with WebSocket live updates
+- ✅ **Full Docker Stack** — All services containerized and wired in docker-compose
 
 ---
 
@@ -29,110 +31,101 @@ This system demonstrates end-to-end MLOps practices for predictive maintenance:
 ```mermaid
 flowchart TB
     subgraph Data Layer
-        A[NASA C-MAPSS<br/>Dataset] --> B[S3 Bronze Layer<br/>Raw Data]
-        B --> C[S3 Silver Layer<br/>Processed Data]
-        C --> D[S3 Gold Layer<br/>ML Features]
+        A[NASA C-MAPSS Dataset] --> B[S3 Bronze Layer]
+        B --> C[S3 Silver Layer]
+        C --> D[S3 Gold Layer]
     end
-    
+
     subgraph ML Pipeline
-        D --> E[GRU Model<br/>Training]
-        E --> F[Model<br/>Evaluation]
-        F --> G{Quality<br/>Gates}
-        G -->|Pass| H[MLflow Model<br/>Registry]
+        D --> E[GRU Training]
+        E --> F[Evaluation]
+        F --> G{Quality Gates}
+        G -->|Pass| H[MLflow Registry]
         G -->|Fail| E
-        H --> I[S3 Artifacts<br/>Storage]
+        H --> I[S3 Artifacts]
     end
-    
-    subgraph Deployment
-        I --> J[Inference<br/>Service]
-        J --> K[Predictions<br/>API]
+
+    subgraph Streaming
+        J[Telemetry Producer] --> K[Redis Stream / Solace]
+        K --> L[Standalone Consumer / PyFlink]
+        L --> M[Redis Feature Store]
+        L --> N[S3 Parquet Offline]
     end
-    
+
+    subgraph Inference
+        I --> O[FastAPI Service]
+        M --> O
+        O --> P[REST + WebSocket API]
+    end
+
+    subgraph Frontend
+        P --> Q[Vue 3 Dashboard]
+    end
+
     subgraph Monitoring
-        K --> L[Prometheus<br/>Metrics]
-        L --> M[Grafana<br/>Dashboards]
+        P --> R[Prometheus]
+        R --> S[Grafana]
     end
-    
+
     style G fill:#FFD700,stroke:#333,stroke-width:2px
     style H fill:#90EE90,stroke:#333,stroke-width:2px
-    style K fill:#87CEEB,stroke:#333,stroke-width:2px
+    style O fill:#87CEEB,stroke:#333,stroke-width:2px
+    style Q fill:#DDA0DD,stroke:#333,stroke-width:2px
 ```
 
 ---
 
-## 📊 Current Performance
+## 📊 Current Model Performance
 
 | Metric | Value | Target | Status |
 |--------|-------|--------|--------|
-| **Test RMSE** | 15.28 cycles | < 20 | ✅ |
-| **NASA Score** | 444.6 | < 2000 | ✅ |
-| **Precision (Critical)** | 95.4% | > 80% | ✅ |
-| **Recall (Critical)** | 84.0% | > 75% | ✅ |
-| **F1-Score** | 0.894 | > 0.80 | ✅ |
+| **Test RMSE** | 26.15 cycles | < 20 | ❌ |
+| **NASA Score** | 2181.2 | < 2000 | ❌ |
+| **Accuracy** | 75.0% | > 80% | ❌ |
+| **F1 (Weighted)** | 0.643 | > 0.80 | ❌ |
+
+> Model needs retraining — run `python main.py` to produce a new version. Metrics update live in the dashboard via `/model/evaluation`.
 
 ---
 
 ## 🚀 Quick Start
 
-### Prerequisites
-
-- Python 3.11+
-- AWS Account (for S3 storage)
-- DagsHub Account (for MLflow tracking)
-
-### Installation
+### Option A — Full Docker Stack (recommended)
 
 ```bash
-# Clone repository
 git clone https://github.com/nasim-raj-laskar/Real-Time-Aircraft-Engine-Predictive-Maintenance-System.git
 cd Real-Time-Aircraft-Engine-Predictive-Maintenance-System
 
-# Install dependencies using uv
-uv sync
-
-# Configure AWS credentials
-aws configure
-
-# Set up environment variables
 cp .env.example .env
-# Edit .env with your credentials:
-# - AWS_ACCESS_KEY_ID
-# - AWS_SECRET_ACCESS_KEY
-# - DAGSHUB_TOKEN
-# - MLFLOW_TRACKING_URI
+# Fill in AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, DAGSHUB_TOKEN, MLFLOW_TRACKING_URI
+
+docker compose up -d
 ```
 
-### Run Pipeline
+| Service | URL |
+|---------|-----|
+| **Dashboard** | http://localhost:5173 |
+| **Inference API** | http://localhost:8000 |
+| **Prometheus** | http://localhost:9090 |
+| **Grafana** | http://localhost:3000 |
+| **Solace Manager** | http://localhost:8080 |
+| **Flink Web UI** | http://localhost:8082 |
+
+### Option B — ML Pipeline Only
 
 ```bash
+uv sync
+aws configure
 python main.py
 ```
 
-**Expected Output:**
-```
-✓ Warnings suppressed
-Accessing as nasim-raj-laskar
-Initialized MLflow...
+### Option C — Frontend Dev Server
 
-Epoch 1/150
-56/56 ━━━━━━━━━━━━━━━━━━━━ 13s - loss: 0.1676 - rmse: 0.2966
-...
-Epoch 150/150
-56/56 ━━━━━━━━━━━━━━━━━━━━ 6s - loss: 0.0342 - rmse: 0.1229
-
-Created version '3' of model 'aircraft-rul-gru'.
-
-======================================================================
-🎉 PIPELINE EXECUTION COMPLETED SUCCESSFULLY
-======================================================================
-
-📊 View your experiment at:
-   https://dagshub.com/nasim-raj-laskar/...
-
-📁 Artifacts saved in: artifacts/
-☁️  Artifacts uploaded to S3
-🏷️  Model registered to MLflow Model Registry
-======================================================================
+```bash
+# Backend must be running first
+cd frontend
+npm install
+npm run dev   # → http://localhost:5173
 ```
 
 ---
@@ -140,206 +133,177 @@ Created version '3' of model 'aircraft-rul-gru'.
 ## 📁 Project Structure
 
 ```
-Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
-│
 ├── src/
-│   ├── components/          # Core ML components
-│   │   ├── data_ingestion.py
-│   │   ├── data_validation.py
-│   │   ├── data_transformation.py
-│   │   ├── feature_engineering.py
-│   │   ├── model_training.py
-│   │   ├── model_evaluation.py
-│   │   └── model_registry.py
-│   │
+│   ├── components/          # 7-stage ML pipeline components
 │   ├── pipeline/            # Pipeline orchestration
-│   ├── config/              # Configuration management
-│   ├── entity/              # Data classes
-│   ├── utils/               # Helper functions
-│   ├── metrics/             # Evaluation metrics
+│   ├── inference/           # FastAPI app, routes, WebSocket, predictor
+│   │   ├── app.py           # FastAPI entry point
+│   │   ├── routes.py        # REST endpoints
+│   │   ├── ws.py            # WebSocket streams
+│   │   ├── feature_store.py # Redis feature store client
+│   │   ├── buffer.py        # Rolling sensor buffer
+│   │   ├── metrics.py       # Prometheus metrics
+│   │   └── structured_logger.py
+│   ├── monitoring/          # Evidently drift detection
 │   ├── cloud/               # S3 integration
-│   └── logging/             # Structured logging
+│   └── utils/
 │
-├── config/                  # YAML configurations
-│   ├── config.yaml          # Pipeline config
-│   ├── model.yaml           # Model architecture
-│   ├── params.yaml          # Training params
-│   └── registor.yaml        # Model registry
+├── streaming/
+│   ├── producer/            # Telemetry producer (Redis Streams + Solace)
+│   ├── pipeline/
+│   │   ├── telemetry_pipeline.py   # PyFlink entry point
+│   │   ├── standalone_consumer.py  # Pure Python consumer (no Flink needed)
+│   │   ├── functions/       # NormalizationFunction, RollingWindowFunction
+│   │   └── sinks/           # RedisSink, S3ParquetSink
+│   ├── model/               # EngineEvent, FeatureVector dataclasses
+│   └── config/              # solace.env
 │
-├── artifacts/               # Generated artifacts
-│   ├── data_ingestion/
-│   ├── data_transformation/
-│   ├── data_feature_engineering/
-│   ├── model_trainer/
-│   ├── model_evaluation/
-│   └── model_registry/
+├── frontend/                # Vue 3 + Vite + TypeScript dashboard
+│   ├── src/
+│   │   ├── pages/           # FleetPage, EnginePage, PipelinePage, MLOpsPage
+│   │   ├── components/      # StatCard, EngineTable, AlertsPanel, charts
+│   │   ├── stores/          # Pinia: engineStore, alertStore
+│   │   ├── composables/     # useWebSockets
+│   │   ├── services/        # api.ts (axios), websocket.ts
+│   │   └── types/           # TypeScript interfaces
+│   └── ...
 │
-├── docs/                    # Documentation
-├── Dataset/                 # NASA C-MAPSS data
-├── main.py                  # Pipeline runner
-└── README.md
+├── monitoring/
+│   ├── prometheus/          # prometheus.yml, alerting_rules.yml
+│   └── grafana/             # Dashboard JSON, provisioning
+│
+├── config/                  # YAML pipeline configs
+├── artifacts/               # Generated model artifacts
+├── docs/                    # Full system documentation (10 docs)
+├── scripts/                 # export_scaler_params.py, install_flink.sh
+├── Dockerfile               # Inference API image
+├── Dockerfile.streaming     # Producer + consumer image
+├── Dockerfile.frontend      # Vue build + nginx image
+├── nginx.conf               # nginx reverse proxy config
+├── docker-compose.yml       # Full stack orchestration
+└── main.py                  # ML pipeline runner
 ```
 
 ---
 
 ## 🔄 ML Pipeline (7 Stages)
 
-### Stage 1: Data Ingestion
-- Downloads raw data from S3 (Bronze layer)
-- Stores locally in `artifacts/data_ingestion/`
-
-### Stage 2: Data Validation
-- Schema validation
-- Column checks
-- Data quality verification
-
-### Stage 3: Data Transformation
-- Drops constant sensors (10 sensors removed)
-- Computes RUL labels
-- Clips RUL at 125 cycles
-- MinMaxScaler normalization
-- Saves to Parquet (Silver layer)
-
-### Stage 4: Feature Engineering
-- Builds sequences (30 timesteps × 11 sensors)
-- Group-aware train/val split (80/20)
-- Saves NumPy arrays (Gold layer)
-
-### Stage 5: Model Training
-- **Architecture:** 3-layer GRU (128, 64, 32 units)
-- **Dense Layers:** 2 layers (32, 16 units)
-- **Dropout:** [0.2, 0.2, 0.15]
-- **Optimizer:** Adam (LR: 0.0003)
-- **Callbacks:** Early stopping, LR reduction
-- **MLflow:** Logs params, metrics, artifacts
-
-### Stage 6: Model Evaluation
-- **Metrics:** RMSE, NASA score, precision, recall, F1
-- **Plots:** Confusion matrix, pred vs true, error distribution
-- **MLflow:** Logs evaluation results
-
-### Stage 7: Model Registry
-- **Quality Gates:** RMSE ≤ 20, NASA Score ≤ 2000
-- **MLflow Registry:** Automatic versioning
-- **Stage Promotion:** None → Staging → Production
-- **S3 Upload:** All artifacts for deployment
+| Stage | Component | Output |
+|-------|-----------|--------|
+| 1 | Data Ingestion | Raw files from S3 Bronze |
+| 2 | Data Validation | Schema + column checks |
+| 3 | Data Transformation | Parquet + scaler → S3 Silver |
+| 4 | Feature Engineering | NumPy sequences → S3 Gold |
+| 5 | Model Training | GRU model + MLflow run |
+| 6 | Model Evaluation | RMSE, NASA score, F1, plots |
+| 7 | Model Registry | MLflow registry + S3 artifacts |
 
 ---
 
 ## 🧠 Model Architecture
 
-```python
-Input: (batch_size, 30, 11)  # 30 timesteps, 11 sensors
+```
+Input:   (batch, 30, 11)       — 30 timesteps, 11 sensors
 
-GRU Layer 1: 128 units, return_sequences=True
-Dropout: 0.2
-
-GRU Layer 2: 64 units, return_sequences=True
-Dropout: 0.2
-
-GRU Layer 3: 32 units
-Dropout: 0.15
-
-Dense Layer 1: 32 units, ReLU, L2 regularization
-Dense Layer 2: 16 units, ReLU, L2 regularization
-
-Output: 1 unit, Sigmoid activation
-
-Output: Normalized RUL in [0, 1]
+GRU 128  return_sequences=True
+Dropout  0.2
+GRU 64   return_sequences=True
+Dropout  0.2
+GRU 32
+Dropout  0.15
+Dense 32  ReLU + L2
+Dense 16  ReLU + L2
+Output 1  Sigmoid  →  RUL in [0, 1]  (denormalize × 125)
 ```
 
-**Training Configuration:**
-- Epochs: 150
-- Batch Size: 256
-- Learning Rate: 0.0003
-- Loss: MSE
-- Sample Weighting: Higher weight for critical engines
+**Training:** Adam lr=0.0003, batch=256, epochs=150, early stopping, sample weighting for critical engines.
 
 ---
 
-## 📈 Dataset
+## 🌊 Streaming Pipeline
 
-**NASA C-MAPSS Turbofan Engine Degradation Dataset**
-
-- **Source:** NASA Prognostics Center of Excellence
-- **Engines:** 100 training, 100 test (FD001)
-- **Sensors:** 21 total, 11 useful (after dropping constants)
-- **Cycles:** 128-362 per engine
-- **Target:** Remaining Useful Life (RUL)
-
-**Useful Sensors:**
 ```
-s2  - Total temperature at LPC outlet (T24)
-s3  - Total temperature at HPC outlet (T30)
-s4  - Total temperature at LPT outlet (T50)
-s7  - Total pressure at HPC outlet (P30)
-s9  - Physical core speed (Nc)
-s11 - Static pressure at HPC outlet (Ps30)
-s12 - Ratio of fuel flow to Ps30 (phi)
-s14 - Corrected core speed (NRc)
-s17 - Bleed enthalpy (htBleed)
-s20 - HPT coolant bleed (W31)
-s21 - LPT coolant bleed (W32)
+Telemetry Producer
+  └─ reads FD001 rows, adds Gaussian noise each pass, loops forever
+  └─ publishes to Redis Stream (default) or Solace PubSub+ (SOLACE_HOST set)
+
+Standalone Consumer  (or PyFlink telemetry_pipeline.py for cluster mode)
+  └─ NormalizationFunction   — MinMax per event, reads scaler_params.csv
+  └─ RollingWindowFunction   — per-engine 30-cycle keyed buffer
+  └─ RedisSink               — writes engine:{id}:features (float32 bytes)
+  └─ S3ParquetSink           — flushes every FLUSH_EVERY vectors
+
+FastAPI /predict/engine/{id}
+  └─ reads engine:{id}:features from Redis
+  └─ GRU forward pass → RUL + risk level
 ```
+
+**Run streaming locally:**
+```bash
+# Terminal 1
+python -m streaming.pipeline.standalone_consumer
+
+# Terminal 2
+python -m streaming.producer.telemetry_producer --throttle 50
+```
+
+---
+
+## 🖥️ Dashboard (Vue 3)
+
+Four pages, all live via WebSocket:
+
+| Page | Route | What it shows |
+|------|-------|---------------|
+| **Fleet Command Center** | `/` | Stat cards, risk pie, RUL bar chart, engine table, alerts |
+| **Engine Detail** | `/engine/:id` | Risk gauge, RUL, confidence, sensor tags, metadata |
+| **Pipeline Monitor** | `/pipeline` | Topology flow, service links, live counters |
+| **ML Observability** | `/mlops` | Active model info, real metrics from API, architecture |
+
+WebSocket streams: `/ws/predictions` (5s), `/ws/telemetry` (2s), `/ws/alerts` (5s)
+
+---
+
+## 🔌 API Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/predict` | Predict from normalized 30×11 array |
+| `POST` | `/predict/raw` | Predict from raw sensor dict array |
+| `GET` | `/predict/engine/{id}` | Predict from Redis feature store |
+| `POST` | `/predict/batch` | Batch predictions |
+| `POST` | `/push` | Push single sensor reading to buffer |
+| `GET` | `/engines` | List all active engines |
+| `GET` | `/engines/{id}` | Engine status + last prediction |
+| `GET` | `/alerts` | Engines at or above risk threshold |
+| `GET` | `/health` | Service health |
+| `GET` | `/model/info` | Model metadata |
+| `GET` | `/model/evaluation` | Real metrics from artifacts |
+| `GET` | `/metrics` | Prometheus scrape endpoint |
+| `WS` | `/ws/predictions` | Live prediction stream |
+| `WS` | `/ws/telemetry` | Live telemetry metadata stream |
+| `WS` | `/ws/alerts` | Live HIGH/CRITICAL alert stream |
 
 ---
 
 ## 🛠️ Technology Stack
 
-### Core ML
-- **TensorFlow/Keras** - Deep learning framework
-- **NumPy** - Numerical computing
-- **Pandas** - Data manipulation
-- **Scikit-learn** - Preprocessing, metrics
-
-### MLOps
-- **MLflow** - Experiment tracking, model registry
-- **DagsHub** - MLflow hosting
-- **AWS S3** - Data lake (Bronze/Silver/Gold)
-- **Boto3** - S3 client
-
-### Data Storage
-- **Parquet** - Processed data format
-- **NumPy Arrays** - Model inputs
-- **JSON** - Configuration and metadata
-
-### Development
-- **uv** - Fast Python package manager
-- **Python 3.11** - Programming language
-
-### Inference & Monitoring (Implemented)
-- **FastAPI** - REST API for inference ✅
-- **Prometheus** - Metrics collection ✅
-- **Evidently AI** - Drift detection ✅
-- **Docker** - Containerized deployment ✅
-- **Redis** - Feature store (ready) ✅
-
-### Future (Designed)
-- **Kafka/Solace** - Event streaming
-- **Apache Flink** - Stream processing
-- **Grafana** - Custom dashboards
-- **PostgreSQL** - Historical data
+| Layer | Technologies |
+|-------|-------------|
+| **ML** | TensorFlow/Keras, NumPy, Pandas, Scikit-learn |
+| **MLOps** | MLflow, DagsHub, AWS S3, Boto3 |
+| **Inference** | FastAPI, Uvicorn, Redis, Pydantic |
+| **Streaming** | Solace PubSub+, Redis Streams, Apache Flink (PyFlink), PyArrow |
+| **Frontend** | Vue 3, Vite, TypeScript, TailwindCSS, ECharts, Pinia, Vue Router |
+| **Monitoring** | Prometheus, Grafana, Evidently AI, Node Exporter, Redis Exporter |
+| **Infrastructure** | Docker, nginx, docker-compose |
+| **Dev** | uv, Python 3.11, Node 20 |
 
 ---
 
-## 📊 MLflow Integration
+## 📊 MLflow
 
-### Experiment Tracking
-
-All training runs are logged to MLflow with:
-- **Parameters:** Model architecture, hyperparameters
-- **Metrics:** Training/validation loss, RMSE, NASA score, F1
-- **Artifacts:** Model, training history, evaluation plots
-
-### Model Registry
-
-Models are automatically registered with:
-- **Versioning:** Each run creates a new version
-- **Stages:** None → Staging → Production
-- **Metadata:** Metrics, parameters, signature
-- **Promotion:** Automated based on quality gates
-
-**Access MLflow UI:**
+All training runs tracked at:
 ```
 https://dagshub.com/nasim-raj-laskar/Real-Time-Aircraft-Engine-Predictive-Maintenance-System.mlflow/
 ```
@@ -348,179 +312,45 @@ https://dagshub.com/nasim-raj-laskar/Real-Time-Aircraft-Engine-Predictive-Mainte
 
 ## ☁️ S3 Data Lake
 
-### Medallion Architecture
-
 ```
 s3://aircraft-engine-data/
-│
-├── bronze/                  # Raw data
-│   ├── train_FD001.txt
-│   ├── test_FD001.txt
-│   └── RUL_FD001.txt
-│
-├── silver/                  # Processed data
-│   ├── train_processed.parquet
-│   └── test_processed.parquet
-│
-├── gold/                    # ML features
-│   ├── X_train.npy
-│   ├── y_train.npy
-│   ├── X_val.npy
-│   ├── y_val.npy
-│   ├── X_test.npy
-│   └── y_test.npy
-│
-└── artifacts/               # Model artifacts
-    ├── model.keras
-    ├── scaler.pkl
-    ├── history.json
-    ├── metrics.json
-    └── *.png (plots)
+├── bronze/          raw FD001 files
+├── silver/          processed Parquet
+├── gold/            NumPy feature arrays
+└── artifacts/       model.keras, scaler.pkl, metrics, plots
 ```
-
----
-
-## 🚀 Inference & Monitoring (NEW!)
-
-### ✅ Implemented Features
-
-**FastAPI Inference Service:**
-```bash
-# Start API
-start_api.bat
-
-# Test predictions
-uv run python test/test_inference.py
-
-# Verify features
-verify_features.bat
-```
-
-**Endpoints:**
-- `POST /predict` - RUL prediction
-- `GET /health` - Health check
-- `GET /metrics` - Prometheus metrics
-- `GET /model/info` - Model metadata
-
-**Prometheus Monitoring:**
-- Request rate & latency tracking
-- ML metrics (RUL, risk, confidence)
-- Error rate monitoring
-- System health metrics
-
-**Drift Detection:**
-```bash
-# Run drift check
-run_drift_check.bat
-```
-- Evidently AI integration
-- Statistical drift detection
-- HTML report generation
-- Alert levels (OK/WARNING/CRITICAL)
-
-**Docker Deployment:**
-```bash
-# Start the full application + monitoring stack
-docker compose up -d
-```
-
-**Services:**
-- Inference API (port 8000)
-- Redis (port 6379)
-- Prometheus (port 9090)
-- Grafana (port 3000)
-
-**See [MONITORING.md](MONITORING.md) for complete guide**
-
----
-
-## 🔮 Future Features (Designed)
-
-### Streaming Pipeline
-- Solace PubSub+ / Kafka event streaming
-- Apache Flink stream processing
-- Redis online feature store
-- PostgreSQL historical data
-
-### Advanced Monitoring
-- Custom Grafana dashboards
-- Alert notifications (Slack/email)
-- Real-time drift monitoring
-- Model performance tracking
-
-**Documentation:** All future features are fully designed in `docs/` folder
 
 ---
 
 ## 📚 Documentation
 
-Comprehensive documentation available in `docs/` folder:
-
-- `00_index.md` - Navigation hub
-- `01_dataset.md` - Dataset reference
-- `02_preprocessing.md` - Preprocessing pipeline
-- `03_feature_engineering.md` - Sequence building
-- `04_model_training.md` - GRU model + Model Registry
-- `05_inference_service.md` - FastAPI design (future)
-- `06_streaming_pipeline.md` - Kafka architecture (future)
-- `07_monitoring.md` - Observability stack (future)
-- `08_project_structure.md` - Project layout
-- `09_architecture.md` - System architecture
-
----
-
-## 🧪 Testing
-
-```bash
-# Run with 10 epochs for quick testing
-# Edit config/params.yaml: epochs: 10
-
-python main.py
-
-# Expected results (10 epochs):
-# - Test RMSE: ~15-18 cycles
-# - F1-Score: ~0.85-0.90
-# - Training time: ~2-3 minutes
-```
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+| Doc | Content |
+|-----|---------|
+| `docs/00_index.md` | Navigation hub |
+| `docs/01_dataset.md` | C-MAPSS dataset reference |
+| `docs/02_preprocessing.md` | Preprocessing pipeline |
+| `docs/03_feature_engineering.md` | Sequence building |
+| `docs/04_model_training.md` | GRU + MLflow registry |
+| `docs/05_inference_service.md` | FastAPI design |
+| `docs/06_streaming_pipeline.md` | Solace + Flink pipeline |
+| `docs/07_monitoring.md` | Prometheus + Grafana + Evidently |
+| `docs/07.1_UI.md` | Vue dashboard architecture |
+| `docs/08_project_structure.md` | Project layout |
+| `docs/09_architecture.md` | System architecture diagrams |
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **NASA Prognostics Center of Excellence** - C-MAPSS dataset
-- **DagsHub** - MLflow hosting
-- **AWS** - S3 storage
+MIT — see [LICENSE](LICENSE)
 
 ---
 
 ## 📧 Contact
 
-**Nasim Raj Laskar**
-- GitHub: [@nasim-raj-laskar](https://github.com/nasim-raj-laskar)
-- MLflow: [View Experiments](https://dagshub.com/nasim-raj-laskar/Real-Time-Aircraft-Engine-Predictive-Maintenance-System.mlflow/)
+**Nasim Raj Laskar** — [@nasim-raj-laskar](https://github.com/nasim-raj-laskar)
 
----
-
-## 🌟 Star History
-
-If you find this project useful, please consider giving it a star! ⭐
+MLflow experiments: [DagsHub](https://dagshub.com/nasim-raj-laskar/Real-Time-Aircraft-Engine-Predictive-Maintenance-System.mlflow/)
 
 ---
 
