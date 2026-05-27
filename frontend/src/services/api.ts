@@ -9,6 +9,15 @@ const api = axios.create({
 
 export const getHealth = () => api.get<HealthStatus>('/health')
 export const getModelInfo = () => api.get<ModelInfo>('/model/info')
+export const getModelEvaluation = () => api.get<{
+  rmse: number
+  nasa_score: number
+  precision_critical: number
+  recall_critical: number
+  f1_critical: number
+  accuracy: number
+  f1_weighted: number
+}>('/model/evaluation')
 export const getEngines = () => api.get<{ engines: EngineStatus[]; total: number }>('/engines')
 export const getEngine = (id: string) => api.get<EngineStatus>(`/engines/${id}`)
 export const getAlerts = (minRisk = 'HIGH') =>

@@ -375,3 +375,26 @@ async def model_info():
         "model_version": _config.get("model_version", "unknown"),
         "trained_on": _config.get("trained_on", "unknown"),
     }
+
+
+@router.get("/model/evaluation")
+async def model_evaluation():
+    """Return evaluation metrics from artifacts/model_evaluation/metrics.json."""
+    import json
+    metrics_path = Path("artifacts/model_evaluation/metrics.json")
+    if not metrics_path.exists():
+        raise HTTPException(status_code=404, detail="Evaluation metrics not found")
+    with open(metrics_path) as f:
+        data = json.load(f)
+    cr = data.get("classification_report", {})
+    critical = cr.get("Critical", {})
+    weighted = cr.get("weighted avg", {})
+    return {
+        "rmse":               round(data.get("rmse", 0), 2),
+        "nasa_score":         round(data.get("nasa_score", 0), 1),
+        "precision_critical": round(critical.get("precision", 0), 3),
+        "recall_critical":    round(critical.get("recall", 0), 3),
+        "f1_critical":        round(critical.get("f1-score", 0), 3),
+        "accuracy":           round(cr.get("accuracy", 0), 3),
+        "f1_weighted":        round(weighted.get("f1-score", 0), 3),
+    }
