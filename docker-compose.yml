@@ -228,6 +228,24 @@ services:
     networks:
       - aircraft-network
 
+  # ── Frontend Dashboard ──────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_URL: ""
+        VITE_WS_URL: ""
+    container_name: aircraft-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      inference-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aircraft-network
+
 networks:
   aircraft-network:
     driver: bridge

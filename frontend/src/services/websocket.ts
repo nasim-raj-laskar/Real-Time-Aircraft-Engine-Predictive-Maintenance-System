@@ -1,6 +1,8 @@
 import type { WsMessage } from '../types'
 
-const BASE = (import.meta.env.VITE_WS_URL || 'ws://localhost:8000')
+// Empty string → derive ws:// from current page origin (nginx proxy in Docker)
+const BASE = import.meta.env.VITE_WS_URL ||
+  `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`
 
 export function createWs(
   path: string,
