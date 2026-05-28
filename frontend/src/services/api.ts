@@ -24,3 +24,5 @@ export const getAlerts = (minRisk = 'HIGH') =>
   api.get<{ alerts: Prediction[]; total: number }>('/alerts', { params: { min_risk_level: minRisk } })
 export const predictEngine = (engineId: string) =>
   api.get<Prediction>(`/predict/engine/${engineId}`)
+export const getDriftReports = () =>
+  api.get<{ reports: { filename: string; size_kb: number }[] }>('/drift/reports')

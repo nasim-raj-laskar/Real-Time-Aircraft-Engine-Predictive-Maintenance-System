@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import DashboardLayout from '../layouts/DashboardLayout.vue'
 import { useEngineStore } from '../stores/engineStore'
-import { getModelEvaluation } from '../services/api'
+import { getModelEvaluation, getDriftReports } from '../services/api'
 
 const store = useEngineStore()
 
@@ -13,7 +13,24 @@ interface Metric {
   ok: boolean
 }
 
-const metrics = ref<Metric[]>([])
+const metrics      = ref<Metric[]>([])
+const reports      = ref<{ filename: string; size_kb: number }[]>([])
+const activeReport = ref<string | null>(null)
+const showIframe   = ref(false)
+
+const reportUrl = computed(() =>
+  activeReport.value ? `${import.meta.env.VITE_API_URL || ''}/drift/reports/${activeReport.value}` : ''
+)
+
+function openReport(filename: string) {
+  activeReport.value = filename
+  showIframe.value   = true
+}
+
+function closeReport() {
+  showIframe.value   = false
+  activeReport.value = null
+}
 
 onMounted(async () => {
   store.fetchModelInfo()
@@ -28,6 +45,10 @@ onMounted(async () => {
       { label: 'Accuracy',          value: `${(Number(e.accuracy) * 100).toFixed(1)}%`,             target: '> 80%',  ok: e.accuracy > 0.8 },
       { label: 'F1 (Weighted)',     value: `${Number(e.f1_weighted).toFixed(3)}`,                   target: '> 0.80', ok: e.f1_weighted > 0.8 },
     ]
+  } catch { /* backend not ready */ }
+  try {
+    const { data } = await getDriftReports()
+    reports.value = data.reports
   } catch { /* backend not ready */ }
 })
 
@@ -137,10 +158,12 @@ const modelReady = () =>
         <p v-else class="text-xs text-gray-600 animate-pulse">Loading metrics...</p>
       </div>
 
-      <!-- Drift monitoring links -->
+      <!-- Drift monitoring -->
       <div class="bg-card border border-border rounded-lg p-4">
         <h3 class="text-sm font-semibold text-gray-300 mb-3">Drift Monitoring</h3>
-        <div class="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+
+        <!-- External links row -->
+        <div class="grid grid-cols-2 md:grid-cols-2 gap-3 text-xs mb-4">
           <a href="http://localhost:9090" target="_blank"
             class="bg-bg border border-border rounded-lg p-3 hover:border-accent transition-colors">
             <p class="text-purple-400 font-semibold">Prometheus</p>
@@ -151,13 +174,52 @@ const modelReady = () =>
             <p class="text-pink-400 font-semibold">Grafana</p>
             <p class="text-gray-600 mt-1">Dashboards</p>
           </a>
-          <a href="http://localhost:8000/model/evaluation" target="_blank"
-            class="bg-bg border border-border rounded-lg p-3 hover:border-accent transition-colors">
-            <p class="text-cyan-400 font-semibold">Evaluation API</p>
-            <p class="text-gray-600 mt-1">Raw metrics JSON</p>
-          </a>
+        </div>
+
+        <!-- Evidently reports list -->
+        <div>
+          <p class="text-xs text-gray-500 mb-2">Evidently Reports
+            <span class="ml-2 text-gray-600">({{ reports.length }} available)</span>
+          </p>
+          <div v-if="!reports.length" class="text-xs text-gray-600 py-3">
+            No drift reports yet — run <span class="font-mono text-accent">python src/monitoring/drift_monitor.py</span> to generate one.
+          </div>
+          <div v-else class="space-y-1">
+            <div v-for="r in reports" :key="r.filename"
+              class="flex items-center justify-between bg-bg border border-border rounded px-3 py-2
+                     hover:border-accent transition-colors cursor-pointer"
+              @click="openReport(r.filename)">
+              <div class="flex items-center gap-2">
+                <span class="text-green-400 text-xs">●</span>
+                <span class="text-xs font-mono text-gray-300">{{ r.filename }}</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <span class="text-xs text-gray-600">{{ r.size_kb }} KB</span>
+                <span class="text-xs text-accent">View ↗</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+
+      <!-- Evidently iframe modal -->
+      <Teleport to="body">
+        <div v-if="showIframe"
+          class="fixed inset-0 z-50 flex flex-col bg-black/80"
+          @keydown.esc="closeReport">
+          <!-- Modal header -->
+          <div class="flex items-center justify-between px-4 py-3 bg-card border-b border-border shrink-0">
+            <div>
+              <p class="text-sm font-semibold text-white">Evidently Drift Report</p>
+              <p class="text-xs text-gray-500 font-mono mt-0.5">{{ activeReport }}</p>
+            </div>
+            <button @click="closeReport"
+              class="text-gray-400 hover:text-white text-xl leading-none px-2">✕</button>
+          </div>
+          <!-- Full-height iframe -->
+          <iframe :src="reportUrl" class="flex-1 w-full border-0 bg-white" />
+        </div>
+      </Teleport>
     </div>
   </DashboardLayout>
 </template>

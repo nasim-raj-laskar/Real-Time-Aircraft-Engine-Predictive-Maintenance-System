@@ -377,6 +377,36 @@ async def model_info():
     }
 
 
+@router.get("/drift/reports")
+async def list_drift_reports():
+    """List all Evidently HTML drift reports in reports/drift/."""
+    from pathlib import Path
+    reports_dir = Path(__file__).parents[2] / "reports" / "drift"
+    if not reports_dir.exists():
+        return {"reports": []}
+    files = sorted(reports_dir.glob("*.html"), reverse=True)
+    return {
+        "reports": [
+            {"filename": f.name, "size_kb": round(f.stat().st_size / 1024, 1)}
+            for f in files
+        ]
+    }
+
+
+@router.get("/drift/reports/{filename}")
+async def get_drift_report(filename: str):
+    """Serve a single Evidently HTML drift report."""
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+    import re
+    if not re.match(r'^[\w\-\.]+\.html$', filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = Path(__file__).parents[2] / "reports" / "drift" / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Report not found")
+    return FileResponse(path, media_type="text/html")
+
+
 @router.get("/model/evaluation")
 async def model_evaluation():
     """Return evaluation metrics from artifacts/model_evaluation/metrics.json."""
