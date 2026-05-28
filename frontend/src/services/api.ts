@@ -26,3 +26,10 @@ export const predictEngine = (engineId: string) =>
   api.get<Prediction>(`/predict/engine/${engineId}`)
 export const getDriftReports = () =>
   api.get<{ reports: { filename: string; size_kb: number }[] }>('/drift/reports')
+export const triggerPipeline = () => api.post<{ status: string; message: string }>('/pipeline/run')
+export const getPipelineStatus = () => api.get<{
+  status: 'idle' | 'running' | 'success' | 'failed'
+  started_at: string | null
+  log_file: string | null
+  exit_code: number | null
+}>('/pipeline/status')
