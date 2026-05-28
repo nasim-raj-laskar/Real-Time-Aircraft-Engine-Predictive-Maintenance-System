@@ -10,8 +10,9 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./artifacts:/app/artifacts:ro
+      - ./artifacts:/app/artifacts
       - ./logs:/app/logs
+      - ./reports:/app/reports
     environment:
       REDIS_URL: redis://redis:6379/0
     healthcheck:

@@ -7,6 +7,7 @@ const router = createRouter({
     { path: '/engine/:id', name: 'engine',   component: () => import('../pages/EnginePage.vue') },
     { path: '/pipeline',   name: 'pipeline', component: () => import('../pages/PipelinePage.vue') },
     { path: '/mlops',      name: 'mlops',    component: () => import('../pages/MLOpsPage.vue') },
+    { path: '/replay',     name: 'replay',   component: () => import('../pages/ReplayPage.vue') },
   ],
 })
 

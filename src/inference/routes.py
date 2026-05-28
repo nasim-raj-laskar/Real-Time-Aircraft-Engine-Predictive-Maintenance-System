@@ -1,8 +1,12 @@
 import time
+import subprocess
+import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from src.entity.config_entity import RawSensorData, SensorData, PredictionResponse, SingleSensorReading
 from src.inference.predictor import run_prediction, run_raw_prediction
@@ -375,6 +379,125 @@ async def model_info():
         "model_version": _config.get("model_version", "unknown"),
         "trained_on": _config.get("trained_on", "unknown"),
     }
+
+
+# ── Pipeline retraining ───────────────────────────────────────────────────────
+_pipeline_state: Dict = {"status": "idle", "started_at": None, "log_file": None, "exit_code": None}
+_pipeline_lock = threading.Lock()
+
+
+def _run_pipeline():
+    import os, sys
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    ts = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
+    log_file = log_dir / f"pipeline_{ts}.log"
+
+    with _pipeline_lock:
+        _pipeline_state["status"]     = "running"
+        _pipeline_state["started_at"] = datetime.now(timezone.utc).isoformat()
+        _pipeline_state["log_file"]   = str(log_file)
+        _pipeline_state["exit_code"]  = None
+
+    # Resolve project root (two levels up from src/inference/routes.py)
+    project_root = Path(__file__).parents[2]
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+
+    with open(log_file, "w") as f:
+        proc = subprocess.Popen(
+            [sys.executable, str(project_root / "main.py")],
+            cwd=str(project_root),
+            stdout=f,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+        proc.wait()
+
+    with _pipeline_lock:
+        _pipeline_state["exit_code"] = proc.returncode
+        _pipeline_state["status"]    = "success" if proc.returncode == 0 else "failed"
+
+
+@router.post("/pipeline/run")
+async def run_pipeline():
+    """Trigger a full ML pipeline retraining run (main.py). Non-blocking."""
+    with _pipeline_lock:
+        if _pipeline_state["status"] == "running":
+            raise HTTPException(status_code=409, detail="Pipeline is already running")
+
+    t = threading.Thread(target=_run_pipeline, daemon=True)
+    t.start()
+    return {"status": "started", "message": "Pipeline triggered — poll /pipeline/status for updates"}
+
+
+@router.get("/pipeline/status")
+async def pipeline_status():
+    """Return current pipeline run state."""
+    with _pipeline_lock:
+        return dict(_pipeline_state)
+
+
+@router.get("/pipeline/logs")
+async def pipeline_logs():
+    """Stream the current (or last) pipeline log file via SSE."""
+    log_file = _pipeline_state.get("log_file")
+    if not log_file or not Path(log_file).exists():
+        # Fall back to most recent log file in logs/
+        logs_dir = Path(__file__).parents[2] / "logs"
+        candidates = sorted(
+            [f for f in logs_dir.rglob("*.log") if f.is_file()],
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+        if not candidates:
+            raise HTTPException(status_code=404, detail="No log file found")
+        log_file = str(candidates[0])
+
+    def generate():
+        with open(log_file, "r") as f:
+            while True:
+                line = f.readline()
+                if line:
+                    yield f"data: {line.rstrip()}\n\n"
+                else:
+                    if _pipeline_state["status"] != "running":
+                        yield "data: [DONE]\n\n"
+                        break
+                    import time as _time
+                    _time.sleep(0.3)
+
+    return StreamingResponse(generate(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/drift/reports")
+async def list_drift_reports():
+    """List all Evidently HTML drift reports in reports/drift/."""
+    from pathlib import Path
+    reports_dir = Path(__file__).parents[2] / "reports" / "drift"
+    if not reports_dir.exists():
+        return {"reports": []}
+    files = sorted(reports_dir.glob("*.html"), reverse=True)
+    return {
+        "reports": [
+            {"filename": f.name, "size_kb": round(f.stat().st_size / 1024, 1)}
+            for f in files
+        ]
+    }
+
+
+@router.get("/drift/reports/{filename}")
+async def get_drift_report(filename: str):
+    """Serve a single Evidently HTML drift report."""
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+    import re
+    if not re.match(r'^[\w\-\.]+\.html$', filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = Path(__file__).parents[2] / "reports" / "drift" / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Report not found")
+    return FileResponse(path, media_type="text/html")
 
 
 @router.get("/model/evaluation")
