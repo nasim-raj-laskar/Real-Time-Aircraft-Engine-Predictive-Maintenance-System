@@ -9,3 +9,4 @@ creds.txt
 accessKeys.csv
 logs/
 solace.env
+reports/
