@@ -305,7 +305,7 @@ const injectionOptions = [
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-gray-500">
           <div class="bg-bg rounded p-3">
             <p class="text-white font-semibold mb-1">1. Push readings</p>
-            <p>Each tick sends a synthetic sensor reading to <span class="font-mono text-accent">POST /push</span>, filling the engine's rolling 30-cycle buffer.</p>
+            <p>Each tick sends a synthetic sensor reading to <span class="font-mono text-accent">POST /push</span>, filling the engine's rolling buffer.</p>
           </div>
           <div class="bg-bg rounded p-3">
             <p class="text-white font-semibold mb-1">2. Buffer fills</p>
