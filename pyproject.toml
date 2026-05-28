@@ -27,6 +27,8 @@ dependencies = [
     "prometheus-client>=0.25.0",
     "redis>=7.4.0",
     "solace-pubsubplus>=1.11.0",
+    "schedule>=1.2.2",
+    "evidently>=0.7.21",
 ]
 
 [dependency-groups]
