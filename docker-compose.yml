@@ -12,6 +12,7 @@ services:
     volumes:
       - ./artifacts:/app/artifacts:ro
       - ./logs:/app/logs
+      - ./reports:/app/reports
     environment:
       REDIS_URL: redis://redis:6379/0
     healthcheck:
