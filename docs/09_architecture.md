@@ -4,58 +4,49 @@
 
 ```mermaid
 flowchart TB
-    subgraph Data Sources
-        A[CSV Dataset<br/>C-MAPSS]
+    subgraph Data Layer
+        A[NASA C-MAPSS Dataset] --> B[S3 Bronze Layer]
+        B --> C[S3 Silver Layer]
+        C --> D[S3 Gold Layer]
     end
-    
-    subgraph Streaming Layer
-        B[Kafka Producer<br/>Telemetry Simulator]
-        C[Kafka Topic<br/>engine_telemetry]
-        D[Feature Consumer<br/>Stream Processor]
-    end
-    
-    subgraph Feature Store
-        E[Redis<br/>Online Features]
-        F[S3/Parquet<br/>Offline Features]
-    end
-    
+
     subgraph ML Pipeline
-        G[Training Pipeline<br/>XGBoost/LSTM]
-        H[MLflow<br/>Model Registry]
+        D --> E[GRU Training]
+        E --> F[Evaluation]
+        F --> G{Quality Gates}
+        G -->|Pass| H[MLflow Registry]
+        G -->|Fail| E
+        H --> I[S3 Artifacts]
     end
-    
+
+    subgraph Streaming
+        J[Telemetry Producer] --> K[Redis Stream / Solace PubSub+]
+        K --> L[Standalone Consumer / PyFlink]
+        L --> M[Redis Feature Store]
+        L --> N[S3 Parquet Offline]
+    end
+
     subgraph Inference
-        I[FastAPI<br/>Prediction Service]
-        J[Model Serving]
+        I --> O[FastAPI Service]
+        M --> O
+        O --> P[REST + WebSocket + SSE API]
     end
-    
+
+    subgraph Frontend
+        P --> Q[Vue 3 Dashboard — 5 pages]
+    end
+
     subgraph Monitoring
-        K[Prometheus<br/>Metrics]
-        L[Grafana<br/>Dashboards]
-        M[Evidently<br/>Drift Detection]
+        P --> R[Prometheus]
+        R --> S[Grafana]
+        T[Evidently AI] --> U[Drift Reports → API]
+        U --> Q
     end
-    
-    A --> B
-    B --> C
-    C --> D
-    D --> E
-    D --> F
-    F --> G
-    G --> H
-    H --> J
-    E --> I
-    J --> I
-    I --> K
-    K --> L
-    E --> M
-    M --> L
-    
-    style A fill:#E8F4F8,stroke:#333,stroke-width:2px,color:#000
-    style C fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
-    style E fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
-    style H fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
-    style I fill:#98FB98,stroke:#333,stroke-width:2px,color:#000
-    style L fill:#DDA0DD,stroke:#333,stroke-width:2px,color:#000
+
+    style G fill:#FFD700,stroke:#333,stroke-width:2px
+    style H fill:#90EE90,stroke:#333,stroke-width:2px
+    style O fill:#87CEEB,stroke:#333,stroke-width:2px
+    style Q fill:#DDA0DD,stroke:#333,stroke-width:2px
 ```
 
 ---
@@ -64,97 +55,155 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-    participant CSV as CSV Files
-    participant KP as Kafka Producer
-    participant KT as Kafka Topic
-    participant FC as Feature Consumer
-    participant R as Redis
-    participant S3 as S3/Parquet
-    participant API as Inference API
-    participant Model as ML Model
-    participant Mon as Monitoring
-    
-    CSV->>KP: Read row by row
-    KP->>KT: Publish event (engine_id, cycle, sensors)
-    KT->>FC: Consume event
-    
-    FC->>FC: Compute rolling features
-    FC->>R: Write online features
-    FC->>S3: Write offline features
-    
-    Note over API: Client requests prediction
-    API->>R: Fetch features for engine_id
-    R-->>API: Return feature vector
-    API->>Model: predict(features)
-    Model-->>API: RUL prediction
-    API->>API: Compute failure risk
-    API->>Mon: Log metrics
-    API-->>API: Return response
-    
-    Note over S3,Model: Periodic retraining
-    S3->>Model: Load historical features
-    Model->>Model: Train new version
+    participant CSV as FD001 Dataset
+    participant PROD as Telemetry Producer
+    participant RS as Redis Stream
+    participant CONS as Standalone Consumer
+    participant R as Redis Feature Store
+    participant S3 as S3 Parquet
+    participant API as FastAPI
+    participant Model as GRU (MC Dropout)
+    participant WS as WebSocket Clients
+
+    CSV->>PROD: Read row by row (loops forever + Gaussian noise)
+    PROD->>RS: XADD telemetry:stream {engine_id, cycle, sensors}
+    RS->>CONS: XREAD batch (200 msgs, 1s block)
+
+    CONS->>CONS: NormalizationFunction (MinMax per event)
+    CONS->>CONS: RollingWindowFunction (30-cycle keyed buffer)
+    CONS->>R: SET engine:{id}:features (float32 bytes)
+    CONS->>R: HSET engine:{id}:meta {cycle, event_time}
+    CONS->>S3: Parquet flush every 500 vectors
+
+    Note over API: WebSocket prediction loop (5s)
+    API->>R: KEYS engine:*:meta → list active engines
+    API->>R: GET engine:{id}:features for each
+    API->>Model: Batched forward pass (N, 30, 11)
+    Model-->>API: RUL predictions
+    API->>WS: Broadcast predictions + alerts
+
+    Note over API: Retraining trigger
+    API->>API: POST /pipeline/run → subprocess main.py
+    API->>WS: SSE stream pipeline logs
 ```
 
 ---
 
-## Component Interaction Map
+## Streaming Pipeline Detail
 
 ```mermaid
-graph TB
-    subgraph External
-        U[User/Client]
-        D[Dataset Files]
+flowchart LR
+    subgraph Producer
+        A[FD001 rows] --> B[Add Gaussian noise]
+        B --> C{Transport}
+        C -->|default| D[Redis XADD\ntelemetry:stream]
+        C -->|SOLACE_HOST set| E[Solace PubSub+\naircraft/engine/*/telemetry/cycle]
     end
-    
-    subgraph Ingestion
-        P[Producer]
-        K[Kafka]
+
+    subgraph Consumer
+        D --> F[XREAD batch]
+        E --> F
+        F --> G[NormalizationFunction\nMinMax stateless]
+        G --> H[RollingWindowFunction\n30-cycle keyed buffer]
+        H --> I{Window full?}
+        I -->|yes| J[RedisSink\nengine:id:features]
+        I -->|yes| K[S3ParquetSink\nflush every 500]
+        I -->|no| L[accumulate]
     end
-    
-    subgraph Processing
-        C[Consumer]
-        FE[Feature Engineering]
+
+    subgraph Inference
+        J --> M[FastAPI\n/predict/engine/id\n/ws/predictions]
     end
-    
-    subgraph Storage
-        R[Redis<br/>Hot Storage]
-        S[S3<br/>Cold Storage]
-        ML[MLflow<br/>Model Store]
+```
+
+**Standalone consumer** (`streaming/pipeline/standalone_consumer.py`) — pure Python, no Flink cluster needed. Default mode.
+
+**PyFlink pipeline** (`streaming/pipeline/telemetry_pipeline.py`) — cluster mode with exactly-once checkpointing, RocksDB state backend, Solace JCSMP connector.
+
+---
+
+## Inference Service Architecture
+
+```mermaid
+flowchart TB
+    subgraph Prediction Pathways
+        A[POST /predict\nnormalized 30×11 array] --> D
+        B[POST /predict/raw\nraw sensor dicts] --> E[InferencePreprocessor\nscaler.transform] --> D
+        C[GET /predict/engine/id\nRedis feature store] --> D
+        F[POST /push → buffer\nGET /predict/stream/id] --> D
+        D[MC Dropout\n30 forward passes\nmean + confidence]
     end
-    
-    subgraph Compute
-        T[Training Job]
-        I[Inference API]
+
+    subgraph WebSocket Streams
+        G[/ws/predictions\n5s — all Redis engines]
+        H[/ws/telemetry\n2s — engine metadata]
+        I[/ws/alerts\n5s — HIGH+CRITICAL only]
     end
-    
-    subgraph Observability
-        PR[Prometheus]
-        G[Grafana]
-        E[Evidently]
+
+    subgraph Pipeline Retraining
+        J[POST /pipeline/run\nnon-blocking subprocess]
+        K[GET /pipeline/status\nidle/running/success/failed]
+        L[GET /pipeline/logs\nSSE line stream]
     end
-    
-    D --> P
-    P --> K
-    K --> C
-    C --> FE
-    FE --> R
-    FE --> S
-    S --> T
-    T --> ML
-    
-    U --> I
-    I --> R
-    I --> ML
-    I --> PR
-    PR --> G
-    R --> E
-    E --> G
-    
-    style R fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
-    style S fill:#4169E1,stroke:#333,stroke-width:2px,color:#fff
-    style ML fill:#32CD32,stroke:#333,stroke-width:2px,color:#000
-    style I fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+
+    subgraph Drift Reports
+        M[GET /drift/reports\nlist HTML files]
+        N[GET /drift/reports/filename\nserve HTML]
+    end
+
+    D --> G
+    D --> I
+```
+
+---
+
+## Redis Key Schema
+
+```
+engine:{id}:features   bytes     float32 tensor (30×11 = 1320 bytes)   TTL 3600s
+engine:{id}:meta       hash      {cycle, event_time, window_size}       TTL 3600s
+engine:{id}:buffer     list      JSON sensor readings (push pathway)    TTL 3600s
+telemetry:stream       stream    Raw EngineEvent JSON (maxlen 50000)
+```
+
+---
+
+## Frontend Architecture
+
+```mermaid
+flowchart TB
+    subgraph Vue 3 Dashboard
+        A[FleetPage /]
+        B[EnginePage /engine/:id]
+        C[PipelinePage /pipeline]
+        D[MLOpsPage /mlops]
+        E[ReplayPage /replay]
+    end
+
+    subgraph State
+        F[engineStore\npredictions, telemetry, modelInfo]
+        G[alertStore\nalerts, acknowledgements]
+    end
+
+    subgraph Transport
+        H[useWebSockets\n/ws/predictions\n/ws/telemetry\n/ws/alerts]
+        I[Axios REST\napi.ts]
+        J[EventSource SSE\n/pipeline/logs]
+        K[fetch polling\n/predict/stream/id]
+    end
+
+    subgraph Backend
+        L[FastAPI :8000]
+        M[nginx proxy :5173→:80]
+    end
+
+    A & B & C & D & E --> F & G
+    H --> F & G
+    I --> F & G
+    J --> D
+    K --> E
+    F & G --> H & I
+    M --> L
 ```
 
 ---
@@ -163,204 +212,46 @@ graph TB
 
 ```mermaid
 graph TB
-    subgraph Docker Compose / Kubernetes
-        subgraph Message Queue
-            ZK[Zookeeper]
-            KF[Kafka Broker]
+    subgraph Docker Compose
+        subgraph Event Broker
+            SOL[Solace PubSub+\n:8080 :55555]
         end
-        
-        subgraph Data Stores
-            RD[Redis]
-            S3[MinIO/S3]
-        end
-        
-        subgraph ML Services
-            MLF[MLflow Server]
-            TR[Training Container]
-        end
-        
+
         subgraph Stream Processing
-            PROD[Producer Container]
-            CONS[Consumer Container]
+            PROD[telemetry-producer\nRedis Streams / Solace]
+            CONS[standalone-consumer\nNormalize → Window → Redis]
         end
-        
-        subgraph API Layer
-            API1[Inference API - Instance 1]
-            API2[Inference API - Instance 2]
-            LB[Load Balancer]
+
+        subgraph Feature Store
+            RD[Redis :6379\nFeatures + Buffer + Stream]
         end
-        
-        subgraph Monitoring Stack
-            PROM[Prometheus]
-            GRAF[Grafana]
-            EVID[Evidently Service]
+
+        subgraph ML Services
+            API[inference-api :8000\nFastAPI + Retraining]
+            FLINK[Flink JobManager :8082]
+        end
+
+        subgraph Frontend
+            FE[frontend :5173\nVue 3 + nginx]
+        end
+
+        subgraph Monitoring
+            PROM[Prometheus :9090]
+            GRAF[Grafana :3000]
+            NODE[node-exporter :9100]
+            REDEX[redis-exporter :9121]
         end
     end
-    
-    ZK --> KF
-    PROD --> KF
-    KF --> CONS
+
+    PROD --> RD
+    RD --> CONS
     CONS --> RD
-    CONS --> S3
-    S3 --> TR
-    TR --> MLF
-    
-    LB --> API1
-    LB --> API2
-    API1 --> RD
-    API2 --> RD
-    API1 --> MLF
-    API2 --> MLF
-    
-    API1 --> PROM
-    API2 --> PROM
+    RD --> API
+    API --> PROM
+    NODE --> PROM
+    REDEX --> PROM
     PROM --> GRAF
-    RD --> EVID
-    EVID --> GRAF
-    
-    style KF fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
-    style RD fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
-    style LB fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
-    style GRAF fill:#DDA0DD,stroke:#333,stroke-width:2px,color:#000
-```
-
----
-
-## Feature Store Architecture
-
-```mermaid
-flowchart LR
-    subgraph Ingestion
-        A[Raw Telemetry]
-    end
-    
-    subgraph Feature Engineering
-        B[Rolling Stats]
-        C[Deviation Features]
-        D[Domain Features]
-    end
-    
-    subgraph Online Store - Redis
-        E[engine:id:features<br/>Latest vector]
-        F[engine:id:buffer<br/>Last 30 cycles]
-        G[engine:id:baseline<br/>Healthy state]
-    end
-    
-    subgraph Offline Store - S3
-        H[Parquet Files<br/>Historical features]
-        I[Partitioned by date]
-    end
-    
-    subgraph Consumers
-        J[Inference API<br/>Low latency reads]
-        K[Training Pipeline<br/>Batch reads]
-    end
-    
-    A --> B
-    A --> C
-    A --> D
-    
-    B --> E
-    C --> E
-    D --> E
-    
-    B --> F
-    C --> G
-    
-    E --> H
-    F --> H
-    G --> H
-    H --> I
-    
-    E --> J
-    F --> J
-    G --> J
-    I --> K
-    
-    style E fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
-    style H fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
-    style J fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
-```
-
----
-
-## Model Training Pipeline
-
-```mermaid
-flowchart TD
-    A[Offline Feature Store<br/>S3/Parquet] --> B[Load Historical Data]
-    B --> C[Train/Val Split<br/>by Engine ID]
-    
-    C --> D[XGBoost Training]
-    C --> E[LSTM Training]
-    
-    D --> F[Hyperparameter Tuning<br/>Optuna]
-    E --> F
-    
-    F --> G[Model Evaluation<br/>RMSE + NASA Score]
-    
-    G --> H{RMSE < Threshold?}
-    H -->|No| I[Log to MLflow<br/>Experiment]
-    I --> F
-    
-    H -->|Yes| J[Register Model<br/>MLflow Registry]
-    J --> K[Staging Environment]
-    K --> L[A/B Test vs Production]
-    
-    L --> M{Better Performance?}
-    M -->|Yes| N[Promote to Production]
-    M -->|No| O[Keep Current Model]
-    
-    N --> P[Update Inference Service]
-    
-    style G fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
-    style H fill:#FFA500,stroke:#333,stroke-width:2px,color:#000
-    style N fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
-    style O fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
-```
-
----
-
-## Real-Time Inference Flow
-
-```mermaid
-flowchart TD
-    A[New Cycle Event<br/>Kafka] --> B[Feature Consumer]
-    
-    B --> C[Fetch Rolling Buffer<br/>Redis]
-    C --> D[Compute Features]
-    D --> E[Write to Redis<br/>engine:id:features]
-    
-    F[Client Request<br/>POST /predict] --> G[Inference API]
-    G --> H[Read Features<br/>from Redis]
-    
-    H --> I{Features Found?}
-    I -->|No| J[Return 404]
-    I -->|Yes| K[Load Model<br/>from Memory]
-    
-    K --> L[Model.predict]
-    L --> M[RUL Prediction]
-    M --> N[Compute Risk Score<br/>risk = 1 - RUL/125]
-    
-    N --> O{Risk Level?}
-    O -->|< 0.3| P[LOW]
-    O -->|0.3-0.6| Q[MEDIUM]
-    O -->|0.6-0.8| R[HIGH]
-    O -->|> 0.8| S[CRITICAL]
-    
-    S --> T[Trigger Alert]
-    
-    P --> U[Return Response]
-    Q --> U
-    R --> U
-    S --> U
-    
-    U --> V[Log Metrics<br/>Prometheus]
-    
-    style E fill:#90EE90,stroke:#333,stroke-width:2px,color:#000
-    style L fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
-    style S fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
-    style T fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
+    FE --> API
 ```
 
 ---
@@ -369,50 +260,32 @@ flowchart TD
 
 ```mermaid
 flowchart TB
-    subgraph Data Sources
-        A[Inference API]
-        B[Feature Consumer]
-        C[Redis]
-        D[Kafka]
+    subgraph Sources
+        A[FastAPI /metrics]
+        B[node-exporter :9100]
+        C[redis-exporter :9121]
     end
-    
-    subgraph Metrics Collection
-        E[Prometheus<br/>Scraper]
+
+    subgraph Collection
+        D[Prometheus scraper\n15s interval]
     end
-    
-    subgraph Metrics Storage
-        F[Prometheus TSDB]
-    end
-    
+
     subgraph Visualization
-        G[Grafana Dashboards]
+        E[Grafana\n15+ panels]
     end
-    
+
     subgraph ML Monitoring
-        H[Evidently<br/>Drift Detection]
+        F[Evidently AI 0.7\nKS-test + DataDriftPreset]
+        G[reports/drift/*.html\nserved via /drift/reports/]
+        H[MLOps page iframe\ninteractive dashboard]
     end
-    
+
     subgraph Alerting
-        I[Alert Manager]
-        J[PagerDuty/Slack]
+        I[alerting_rules.yml\nCriticalEngine, HighLatency\nHighErrorRate, APIDown, RedisMemory]
     end
-    
-    A -->|/metrics endpoint| E
-    B -->|/metrics endpoint| E
-    C -->|Redis Exporter| E
-    D -->|Kafka Exporter| E
-    
-    E --> F
-    F --> G
-    
-    C --> H
-    H --> G
-    
-    F --> I
-    I --> J
-    
-    style E fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
-    style G fill:#DDA0DD,stroke:#333,stroke-width:2px,color:#000
-    style H fill:#87CEEB,stroke:#333,stroke-width:2px,color:#000
-    style J fill:#FF6B6B,stroke:#333,stroke-width:2px,color:#000
+
+    A & B & C --> D
+    D --> E
+    D --> I
+    F --> G --> H
 ```
