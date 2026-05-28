@@ -1,6 +1,6 @@
 {
-    "rmse": 31.00177882843731,
-    "nasa_score": 5161.0869140625,
+    "rmse": 23.71792524710675,
+    "nasa_score": 2152.906005859375,
     "classification_report": {
         "Non-Critical": {
             "precision": 0.75,
