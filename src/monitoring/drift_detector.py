@@ -1,8 +1,5 @@
 from evidently import Report
-from evidently.presets import (
-    DataDriftPreset,
-    DataSummaryPreset
-)
+from evidently.presets import DataDriftPreset
 
 import pandas as pd
 import logging
@@ -255,69 +252,22 @@ class DriftDetector:
         current_data: pd.DataFrame,
         output_path: Path
     ):
-
         try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Create output directory
-            output_path.parent.mkdir(
-                parents=True,
-                exist_ok=True
+            available_cols = [
+                col for col in self.sensor_cols
+                if col in current_data.columns
+            ]
+
+            report = Report(metrics=[DataDriftPreset()])
+            snapshot = report.run(
+                reference_data=self.reference_df[available_cols],
+                current_data=current_data[available_cols],
             )
+            snapshot.save_html(str(output_path))
 
-            # Simple fallback HTML report
-            with open(
-                output_path,
-                "w",
-                encoding="utf-8"
-            ) as f:
-
-                f.write(
-                    f"""
-                    <html>
-
-                    <head>
-                        <title>Drift Report</title>
-                    </head>
-
-                    <body>
-
-                        <h1>
-                        Aircraft Engine Drift Report
-                        </h1>
-
-                        <p>
-                        Generated at:
-                        {datetime.now().isoformat()}
-                        </p>
-
-                        <h2>
-                        Drift Detection Summary
-                        </h2>
-
-                        <p>
-                        Statistical drift detection
-                        completed successfully.
-                        </p>
-
-                        <p>
-                        Evidently HTML rendering was
-                        unavailable in the installed
-                        version.
-                        </p>
-
-                    </body>
-
-                    </html>
-                    """
-                )
-
-            logger.info(
-                f"Fallback drift report saved to: "
-                f"{output_path}"
-            )
+            logger.info(f"Evidently drift report saved to: {output_path}")
 
         except Exception:
-
-            logger.exception(
-                "Failed to save report."
-            )
+            logger.exception("Failed to save Evidently report.")
