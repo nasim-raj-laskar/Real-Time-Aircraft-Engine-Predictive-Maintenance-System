@@ -12,6 +12,7 @@ const nav = [
   { to: '/',         label: 'Fleet',    icon: '⬡' },
   { to: '/pipeline', label: 'Pipeline', icon: '⇌' },
   { to: '/mlops',    label: 'MLOps',    icon: '◈' },
+  { to: '/replay',   label: 'Replay',   icon: '⏵' },
 ]
 
 const unackCount = computed(() => alertStore.unacknowledged().length)
