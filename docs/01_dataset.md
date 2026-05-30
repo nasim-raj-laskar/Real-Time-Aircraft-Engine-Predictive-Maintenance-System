@@ -139,3 +139,7 @@ graph LR
 - Each engine has a different lifespan due to manufacturing variation.
 - The test set ends before failure — you never see the failure event in test data.
 - RUL is not directly observable — it must be computed from training data.
+
+## EDA
+
+![EDA](../assets/EDA.png)

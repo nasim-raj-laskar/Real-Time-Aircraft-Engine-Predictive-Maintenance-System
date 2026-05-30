@@ -331,12 +331,3 @@ MIT — see [LICENSE](LICENSE)
 
 ---
 
-## 📧 Contact
-
-**Nasim Raj Laskar** — [@nasim-raj-laskar](https://github.com/nasim-raj-laskar)
-
-MLflow experiments: [DagsHub](https://dagshub.com/nasim-raj-laskar/Real-Time-Aircraft-Engine-Predictive-Maintenance-System.mlflow/)
-
----
-
-**Built with ❤️ for Production ML Systems**

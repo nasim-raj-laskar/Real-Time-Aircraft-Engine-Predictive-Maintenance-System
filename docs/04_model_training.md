@@ -52,11 +52,13 @@ At inference, 30 forward passes are run with `training=True` (dropout active):
 
 ```mermaid
 flowchart LR
-    X["Input\n(1, 30, 11)"] --> P1["Pass 1\nDropout active"]
-    X --> P2["Pass 2\nDropout active"]
-    X --> P3["... 30 passes ..."]
-    P1 & P2 & P3 --> STATS["mean → RUL\nstd → uncertainty"]
-    STATS --> CONF["confidence =\n1 − std × 10\nclamped to 0–1"]
+    X[Input 1x30x11] --> P1[Pass 1 Dropout active]
+    X --> P2[Pass 2 Dropout active]
+    X --> P3[... 30 passes ...]
+    P1 --> STATS[mean RUL + std uncertainty]
+    P2 --> STATS
+    P3 --> STATS
+    STATS --> CONF[confidence = 1 minus std x10 clamped 0-1]
 
     style CONF fill:#166534,color:#fff,stroke:none
 ```
@@ -119,6 +121,26 @@ Both must pass. If either fails, the model is not registered and a warning is lo
 | F1 (Crit.) | 0.898 | > 0.80 | ✅ |
 | Accuracy | 95.0% | > 80% | ✅ |
 | F1 (Weighted) | 0.950 | > 0.80 | ✅ |
+
+**Training curve:**
+
+![Training Curve](../assets/train-curve.png)
+
+**Prediction vs True RUL and Error Distribution:**
+
+![Pred vs True and Error Distribution](../assets/predvstrue&errordist.png)
+
+**Confusion Matrix and Mean Error by RUL Bucket:**
+
+![Confusion Matrix and Mean Error](../assets/mean_error_by_rul_bucker&confussion_matric.png)
+
+**Classification Report:**
+
+![Classification Report](../assets/classification_report.png)
+
+**Model Layer Summary:**
+
+![Model Layers](../assets/model_layers.png)
 
 ---
 

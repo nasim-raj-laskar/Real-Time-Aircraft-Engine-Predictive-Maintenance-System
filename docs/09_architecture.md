@@ -123,28 +123,18 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    subgraph Pathways["Prediction Pathways"]
-        A[POST /predict\nnormalized 30×11] --> D
-        B[POST /predict/raw\nraw sensor dicts] --> E[InferencePreprocessor\nscaler.transform] --> D
-        C[GET /predict/engine/id\nRedis feature store] --> D
-        F[POST /push → buffer\nGET /predict/stream/id] --> D
-        D[GRU Model\nbatch forward pass\ntraining=False]
-    end
+    A[POST /predict\nnormalized 30x11] --> D
+    B[POST /predict/raw\nraw sensor dicts] --> PRE[InferencePreprocessor\nscaler.transform] --> D
+    C[GET /predict/engine/id\nRedis feature store] --> D
+    F[POST /push + GET /predict/stream/id\npush buffer pathway] --> D
+    D[GRU Model\nbatch forward pass\ntraining=False]
 
-    subgraph WS["WebSocket Streams"]
-        G[/ws/predictions\n5s · all Redis engines\nbatched inference]
-        H[/ws/telemetry\n2s · engine metadata]
-        I[/ws/alerts\n5s · HIGH+CRITICAL only]
-    end
+    D --> WP[ws/predictions\n5s · all Redis engines]
+    D --> WA[ws/alerts\n5s · HIGH+CRITICAL only]
+    WP --> PROM[Prometheus metrics\nactive_engines · requests\nlatency · critical_gauge]
 
-    subgraph Retrain["Pipeline Retraining"]
-        J[POST /pipeline/run\nnon-blocking subprocess]
-        K[GET /pipeline/status\nidle/running/success/failed]
-        L[GET /pipeline/logs\nSSE line stream]
-    end
-
-    D --> G & I
-    G --> PROM[Prometheus metrics\nactive_engines · requests\nlatency · critical_gauge]
+    PR[POST /pipeline/run\nnon-blocking subprocess] --> PS[GET /pipeline/status\nidle · running · success · failed]
+    PS --> PL[GET /pipeline/logs\nSSE line stream]
 ```
 
 ---
@@ -277,8 +267,13 @@ flowchart TB
         I[alerting_rules.yml\nCriticalEngine · HighLatency\nHighErrorRate · APIDown · RedisMemory]
     end
 
-    A & B & C --> D
+    A --> D
+    B --> D
+    C --> D
     D --> E
     D --> I
-    F --> G --> H
+    F --> G
+    G --> H
 ```
+
+![Grafana Dashboard](../assets/grafana.png)

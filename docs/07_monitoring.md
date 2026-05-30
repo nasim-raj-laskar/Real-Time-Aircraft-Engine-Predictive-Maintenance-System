@@ -79,22 +79,16 @@ All metrics defined in `src/inference/metrics.py` and exposed at `GET /metrics`.
 
 Auto-provisioned from `monitoring/grafana/dashboards/aircraft_engine_monitoring.json` on startup. 15+ panels across 4 rows:
 
-```mermaid
-block-beta
-    columns 6
-    P1["Active Engines\nGauge"]:1
-    P2["Prediction\nThroughput req/s"]:1
-    P3["Critical Engines\nGauge"]:1
-    P4["Model Load\nTime"]:1
-    P5["Error Rate\nerrors/s"]:1
-    P6["Avg Confidence\np50"]:1
-    P7["Prediction Latency\np50 / p95 / p99"]:3
-    P8["Requests by\nRisk Level"]:3
-    P9["RUL Distribution\nHistogram"]:3
-    P10["Risk Score\nDistribution"]:3
-    P11["CPU Usage %"]:4
-    P12["Memory Usage %"]:4 %% wrong, but block-beta is limited
-```
+| Row | Panels |
+|-----|--------|
+| Row 1 — Stats | Active Engines · Prediction Throughput · Critical Engines · Model Load Time · Error Rate · Avg Confidence |
+| Row 2 — Time Series | Prediction Latency p50/p95/p99 · Requests by Risk Level |
+| Row 3 — Distributions | RUL Distribution · Risk Score Distribution |
+| Row 4 — System | CPU Usage % · Memory Usage % |
+| Row 5 — Redis | Connected Clients · Memory % · Commands/s |
+| Row 6 — Errors | Prediction Errors by Type · Inference API Up |
+
+![Grafana Dashboard](../assets/grafana.png)
 
 Key panel queries:
 
