@@ -21,6 +21,15 @@ from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.routing import APIRouter
 
 from src.inference.feature_store import RedisFeatureStore
+from src.inference.metrics import (
+    prediction_requests_total,
+    predicted_rul_cycles,
+    failure_risk_score,
+    critical_engines_total,
+    prediction_confidence,
+    prediction_latency_seconds,
+    active_engines,
+)
 
 ws_router = APIRouter()
 
@@ -57,16 +66,22 @@ def _predict_all_engines(engine_ids: list) -> list:
             valid_ids.append(eid)
 
     if not windows:
+        active_engines.set(0)
         return []
 
     import numpy as np
+    import time as _time
     X = np.stack(windows, axis=0).astype(np.float32)  # (N, 30, 11)
+    t0 = _time.perf_counter()
     preds = _model(X, training=False).numpy()[:, 0]   # (N,)
+    prediction_latency_seconds.observe(_time.perf_counter() - t0)
 
     rul_clip = _config.get("rul_clip", 125)
     results = []
     now = datetime.now(timezone.utc).isoformat()
     version = _config.get("model_version", "unknown")
+
+    active_engines.set(len(valid_ids))
 
     for eid, rul_norm in zip(valid_ids, preds):
         rul = max(0.0, float(rul_norm) * rul_clip)
@@ -75,6 +90,12 @@ def _predict_all_engines(engine_ids: list) -> list:
         elif risk >= 0.6: risk_level = "HIGH"
         elif risk >= 0.3: risk_level = "MEDIUM"
         else:             risk_level = "LOW"
+
+        prediction_requests_total.labels(engine_id=eid, risk_level=risk_level).inc()
+        predicted_rul_cycles.observe(rul)
+        failure_risk_score.observe(risk)
+        prediction_confidence.observe(1.0)
+
         results.append({
             "engine_id": eid,
             "remaining_cycles": int(round(rul)),
@@ -84,6 +105,7 @@ def _predict_all_engines(engine_ids: list) -> list:
             "timestamp": now,
             "model_version": version,
         })
+    critical_engines_total.set(sum(1 for r in results if r["risk_level"] == "CRITICAL"))
     return results
 
 

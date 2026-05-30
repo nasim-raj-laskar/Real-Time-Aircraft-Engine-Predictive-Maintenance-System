@@ -2,15 +2,15 @@
 
 ## Overview
 
-The inference service is a FastAPI application that serves the trained GRU model for real-time RUL predictions. It supports three prediction pathways, WebSocket streaming, Prometheus metrics, structured logging, and on-demand pipeline retraining.
+FastAPI application serving the trained GRU model for real-time RUL predictions. Three prediction pathways, WebSocket streaming, Prometheus metrics, structured logging, and on-demand pipeline retraining.
 
 ```mermaid
 sequenceDiagram
     participant Client
-    participant API as FastAPI
+    participant API as FastAPI :8000
     participant Redis as Redis Feature Store
     participant Buffer as Push Buffer
-    participant Model as GRU Model (MC Dropout)
+    participant Model as GRU (MC Dropout)
 
     Client->>API: POST /predict/raw {sensor_data}
     API->>Model: MC Dropout × 30 forward passes
@@ -24,9 +24,9 @@ sequenceDiagram
     API-->>Client: {rul, risk, risk_level, confidence}
 
     Client->>API: POST /push {reading}
-    API->>Buffer: rpush engine:{id}:buffer
+    API->>Buffer: push to engine:{id}:buffer
     Client->>API: GET /predict/stream/{id}
-    API->>Buffer: lrange → 30-cycle window
+    API->>Buffer: get 30-cycle window
     API->>Model: predict
     API-->>Client: {rul, risk, risk_level, confidence}
 ```
@@ -40,7 +40,7 @@ sequenceDiagram
 | Normalized array | `POST /predict` | Request body (30×11 float array) | Direct model access |
 | Raw sensors | `POST /predict/raw` | Request body (30 dicts of raw values) | Pre-scaler input |
 | Redis feature store | `GET /predict/engine/{id}` | `engine:{id}:features` written by streaming consumer | Live streaming pipeline |
-| Push buffer | `GET /predict/stream/{id}` | `engine:{id}:buffer` written by `POST /push` | Replay / simulation |
+| Push buffer | `GET /predict/stream/{id}` | `engine:{id}:buffer` written by `POST /push` | Replay / simulation lab |
 | Batch | `POST /predict/batch` | List of normalized arrays | Bulk inference |
 
 ---
@@ -73,37 +73,48 @@ sequenceDiagram
 
 ---
 
-## Confidence via MC Dropout
+## WebSocket Batch Prediction Loop
 
-Predictions use Monte Carlo Dropout (30 forward passes with `training=True`) to estimate uncertainty:
+The `/ws/predictions` endpoint runs a batched TF forward pass every 5 seconds across all active engines — O(1) model calls regardless of fleet size:
 
-```python
-preds = [model(X, training=True).numpy()[0][0] for _ in range(30)]
-mean       = float(np.mean(preds))
-confidence = float(max(0.0, min(1.0, 1.0 - np.std(preds) * 10)))
+```mermaid
+flowchart TD
+    WS[WebSocket client connects] --> LOOP[Every 5 seconds]
+    LOOP --> LIST[list_active_engines\nKEYS engine:*:features]
+    LIST --> FETCH[Fetch all feature tensors\nGET engine:id:features]
+    FETCH --> STACK[Stack into\nN × 30 × 11 batch]
+    STACK --> MODEL[Single batched\nforward pass\ntraining=False]
+    MODEL --> METRICS[Record Prometheus metrics\nactive_engines · requests · latency\ncritical_engines gauge]
+    METRICS --> BROADCAST[Broadcast predictions\nsorted by failure_risk desc]
+
+    style MODEL fill:#0e7490,color:#fff,stroke:none
+    style METRICS fill:#166534,color:#fff,stroke:none
 ```
-
-Higher variance across passes → lower confidence. This gives a meaningful uncertainty estimate without a separate ensemble.
 
 ---
 
 ## Pipeline Retraining
 
-The inference container can trigger a full 7-stage ML pipeline rerun:
+```mermaid
+sequenceDiagram
+    participant UI as Dashboard
+    participant API as FastAPI
+    participant Sub as Subprocess main.py
+    participant SSE as SSE Client
 
-```bash
-# Trigger (non-blocking — returns immediately)
-curl -X POST http://localhost:8000/pipeline/run
+    UI->>API: POST /pipeline/run
+    API-->>UI: {status: started}
+    API->>Sub: spawn main.py (non-blocking)
 
-# Poll status
-curl http://localhost:8000/pipeline/status
-# {"status": "running", "started_at": "...", "log_file": "...", "exit_code": null}
+    SSE->>API: GET /pipeline/logs (EventSource)
+    loop Every log line
+        Sub->>API: write to log file
+        API->>SSE: data: <line>
+    end
 
-# Stream logs via SSE
-curl -N http://localhost:8000/pipeline/logs
+    Sub-->>API: exit 0 or 1
+    API-->>UI: status → success / failed
 ```
-
-The pipeline runs `main.py` as a subprocess. Logs are written to `logs/pipeline_<timestamp>.log` and streamed line-by-line via Server-Sent Events. On completion, `status` transitions to `success` or `failed` and `exit_code` is set.
 
 Returns `409 Conflict` if a run is already in progress.
 
@@ -117,86 +128,42 @@ Returns `409 Conflict` if a run is already in progress.
 | `engine:{id}:meta` | hash | Streaming consumer | `/ws/telemetry` |
 | `engine:{id}:buffer` | list (JSON) | `POST /push` | `/predict/stream/{id}` |
 
-TTL on all keys: 3600s (configurable via `redis.yaml`).
+TTL on all keys: **3600s** (configurable via `config/redis.yaml`).
 
 ---
 
 ## Prometheus Metrics
 
-| Metric | Type | Labels |
-|--------|------|--------|
-| `prediction_requests_total` | Counter | `engine_id`, `risk_level` |
-| `prediction_latency_seconds` | Histogram | — |
-| `predicted_rul_cycles` | Histogram | — |
-| `failure_risk_score` | Histogram | — |
-| `prediction_confidence` | Histogram | — |
-| `critical_engines_total` | Counter | — |
-| `prediction_errors_total` | Counter | `error_type` |
-| `model_load_time_seconds` | Gauge | — |
-| `active_engines_total` | Gauge | — |
+| Metric | Type | Labels | Notes |
+|--------|------|--------|-------|
+| `prediction_requests_total` | Counter | `engine_id`, `risk_level` | Incremented by WS batch loop |
+| `prediction_latency_seconds` | Histogram | — | Timed on each batch forward pass |
+| `predicted_rul_cycles` | Histogram | — | Distribution of predicted RUL values |
+| `failure_risk_score` | Histogram | — | Distribution of risk scores |
+| `prediction_confidence` | Histogram | — | Distribution of confidence scores |
+| `critical_engines_total` | **Gauge** | — | Current count of CRITICAL engines (set each WS cycle) |
+| `prediction_errors_total` | Counter | `error_type` | |
+| `model_load_time_seconds` | Gauge | — | Set once at startup |
+| `active_engines_total` | Gauge | — | Set each WS cycle |
+
+> `critical_engines_total` is a **Gauge** (not Counter) — it reflects the current number of CRITICAL engines, not a running total. This prevents the metric from growing unboundedly as the fleet cycles through risk levels.
 
 ---
 
 ## Docker Deployment
 
 ```yaml
-# docker-compose.yml (inference-api service)
 inference-api:
-  build:
-    context: .
-    dockerfile: Dockerfile
-  ports:
-    - "8000:8000"
+  build: { context: ., dockerfile: Dockerfile }
+  ports: ["8000:8000"]
   volumes:
-    - ./artifacts:/app/artifacts   # writable — retraining writes here
+    - ./artifacts:/app/artifacts   # rw — retraining writes here
     - ./logs:/app/logs
     - ./reports:/app/reports
   environment:
     REDIS_URL: redis://redis:6379/0
   depends_on:
-    redis:
-      condition: service_healthy
+    redis: { condition: service_healthy }
 ```
 
-`artifacts/` is mounted **read-write** so that pipeline retraining can write new model artifacts, evaluation metrics, and validation status files directly into the host directory.
-
----
-
-## Testing
-
-```bash
-# Health
-curl http://localhost:8000/health
-
-# Predict from raw sensors
-curl -X POST http://localhost:8000/predict/raw \
-  -H "Content-Type: application/json" \
-  -d '{"engine_id": "ENG-001", "sensor_data": [{"s2":641,"s3":1590,...}, ...]}'
-
-# Push buffer + stream predict
-curl -X POST http://localhost:8000/push \
-  -H "Content-Type: application/json" \
-  -d '{"engine_id": "ENG-SIM-1", "reading": {"s2":0.52,"s3":0.61,...}}'
-
-curl http://localhost:8000/predict/stream/ENG-SIM-1
-
-# Trigger retraining
-curl -X POST http://localhost:8000/pipeline/run
-
-# List drift reports
-curl http://localhost:8000/drift/reports
-```
-
----
-
-## Deployment Checklist
-
-- [x] Model artifacts in `artifacts/model_trainer/model.keras`
-- [x] Scaler in `artifacts/data_transformation/scaler.pkl`
-- [x] Feature config in `artifacts/data_feature_engineering/feature_config.json`
-- [x] Redis running and reachable
-- [x] `artifacts/` volume mounted read-write (required for retraining)
-- [x] `reports/` volume mounted (required for drift report serving)
-- [x] `logs/` volume mounted (required for log streaming)
-- [x] Health endpoint returns 200
-- [x] `/ws/predictions` WebSocket streams predictions
+`artifacts/` is mounted **read-write** so that pipeline retraining can write new model artifacts directly into the host directory without rebuilding the container.

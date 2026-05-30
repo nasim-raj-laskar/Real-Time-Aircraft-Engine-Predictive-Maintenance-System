@@ -38,7 +38,7 @@
         "overrides": []
       },
       "targets": [
-        { "expr": "active_engines_total", "legendFormat": "Active Engines", "refId": "A" }
+        { "expr": "active_engines_total", "legendFormat": "Active Engines", "refId": "A", "instant": true }
       ]
     },
 
@@ -65,7 +65,7 @@
         "overrides": []
       },
       "targets": [
-        { "expr": "sum(rate(prediction_requests_total[1m]))", "legendFormat": "req/s", "refId": "A" }
+        { "expr": "sum(rate(prediction_requests_total[1m]))", "legendFormat": "req/s", "refId": "A", "instant": true }
       ]
     },
 
@@ -94,7 +94,7 @@
         "overrides": []
       },
       "targets": [
-        { "expr": "rate(critical_engines_total[5m]) * 60", "legendFormat": "Critical/min", "refId": "A" }
+        { "expr": "critical_engines_total", "legendFormat": "Critical Engines", "refId": "A", "instant": true }
       ]
     },
 
@@ -155,7 +155,7 @@
         "overrides": []
       },
       "targets": [
-        { "expr": "sum(rate(prediction_errors_total[5m]))", "legendFormat": "Errors/s", "refId": "A" }
+        { "expr": "sum(rate(prediction_errors_total[5m])) or vector(0)", "legendFormat": "Errors/s", "refId": "A", "instant": true }
       ]
     },
 
@@ -187,9 +187,10 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(prediction_confidence_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(prediction_confidence_bucket[5m])) by (le)) or vector(0)",
           "legendFormat": "Median Confidence",
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         }
       ]
     },
@@ -391,7 +392,7 @@
       },
       "targets": [
         {
-          "expr": "redis_memory_used_bytes / redis_memory_max_bytes * 100",
+          "expr": "redis_memory_used_bytes / (redis_memory_max_bytes > 0 or redis_memory_used_bytes) * 100",
           "legendFormat": "Memory %",
           "refId": "A"
         }
@@ -431,7 +432,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (error_type) (rate(prediction_errors_total[5m]))",
+          "expr": "sum by (error_type) (rate(prediction_errors_total[5m])) or vector(0)",
           "legendFormat": "{{error_type}}",
           "refId": "A"
         }

@@ -4,42 +4,41 @@
 
 ```mermaid
 flowchart TB
-    subgraph Data Layer
-        A[NASA C-MAPSS Dataset] --> B[S3 Bronze Layer]
-        B --> C[S3 Silver Layer]
-        C --> D[S3 Gold Layer]
+    subgraph Data["Data Layer"]
+        A[NASA C-MAPSS FD001] --> B[S3 Bronze\nraw files]
+        B --> C[S3 Silver\nParquet + scaler]
+        C --> D[S3 Gold\nNumPy sequences]
     end
 
-    subgraph ML Pipeline
-        D --> E[GRU Training]
-        E --> F[Evaluation]
-        F --> G{Quality Gates}
-        G -->|Pass| H[MLflow Registry]
+    subgraph Pipeline["ML Pipeline — 7 Stages"]
+        D --> E[GRU Training\n3-layer 128→64→32]
+        E --> F[Evaluation\nRMSE · NASA · F1]
+        F --> G{Quality Gates\nRMSE < 20\nNASA < 2000}
+        G -->|Pass| H[MLflow Registry\nDagsHub]
         G -->|Fail| E
-        H --> I[S3 Artifacts]
+        H --> I[S3 Artifacts\nmodel.keras · scaler.pkl]
     end
 
-    subgraph Streaming
-        J[Telemetry Producer] --> K[Redis Stream / Solace PubSub+]
-        K --> L[Standalone Consumer / PyFlink]
-        L --> M[Redis Feature Store]
-        L --> N[S3 Parquet Offline]
+    subgraph Stream["Streaming Pipeline"]
+        J[Telemetry Producer\n100 engines\nrisk-distributed] --> K[Redis Streams\ndefault transport]
+        K --> L[Standalone Consumer\nor PyFlink cluster]
+        L --> M[Redis Feature Store\nengine:id:features]
+        L --> N[S3 Parquet\noffline store]
     end
 
-    subgraph Inference
-        I --> O[FastAPI Service]
+    subgraph Infer["Inference Service"]
+        I --> O[FastAPI :8000\nREST + WS + SSE]
         M --> O
-        O --> P[REST + WebSocket + SSE API]
     end
 
-    subgraph Frontend
-        P --> Q[Vue 3 Dashboard — 5 pages]
+    subgraph UI["Frontend"]
+        O --> Q[Vue 3 Dashboard\n5 pages · 3 WS streams]
     end
 
-    subgraph Monitoring
-        P --> R[Prometheus]
-        R --> S[Grafana]
-        T[Evidently AI] --> U[Drift Reports → API]
+    subgraph Mon["Monitoring"]
+        O --> R[Prometheus :9090]
+        R --> S[Grafana :3000\n15+ panels]
+        T[Evidently AI 0.7\nKS-test drift] --> U[HTML Reports\nserved via API]
         U --> Q
     end
 
@@ -51,7 +50,7 @@ flowchart TB
 
 ---
 
-## Data Flow Architecture
+## Data Flow
 
 ```mermaid
 sequenceDiagram
@@ -62,27 +61,28 @@ sequenceDiagram
     participant R as Redis Feature Store
     participant S3 as S3 Parquet
     participant API as FastAPI
-    participant Model as GRU (MC Dropout)
+    participant Model as GRU (batch)
     participant WS as WebSocket Clients
 
-    CSV->>PROD: Read row by row (loops forever + Gaussian noise)
+    CSV->>PROD: Read rows · risk-distributed lifecycle offsets
     PROD->>RS: XADD telemetry:stream {engine_id, cycle, sensors}
-    RS->>CONS: XREAD batch (200 msgs, 1s block)
+    RS->>CONS: XREAD batch 200 msgs · 1s block
 
-    CONS->>CONS: NormalizationFunction (MinMax per event)
+    CONS->>CONS: NormalizationFunction (MinMax stateless)
     CONS->>CONS: RollingWindowFunction (30-cycle keyed buffer)
-    CONS->>R: SET engine:{id}:features (float32 bytes)
+    CONS->>R: SET engine:{id}:features (float32 bytes · TTL 1h)
     CONS->>R: HSET engine:{id}:meta {cycle, event_time}
     CONS->>S3: Parquet flush every 500 vectors
 
-    Note over API: WebSocket prediction loop (5s)
-    API->>R: KEYS engine:*:meta → list active engines
+    Note over API: WebSocket prediction loop (every 5s)
+    API->>R: KEYS engine:*:features → list active engines
     API->>R: GET engine:{id}:features for each
-    API->>Model: Batched forward pass (N, 30, 11)
-    Model-->>API: RUL predictions
+    API->>Model: Single batched forward pass (N, 30, 11)
+    Model-->>API: RUL predictions array
+    API->>API: Record Prometheus metrics
     API->>WS: Broadcast predictions + alerts
 
-    Note over API: Retraining trigger
+    Note over API: On-demand retraining
     API->>API: POST /pipeline/run → subprocess main.py
     API->>WS: SSE stream pipeline logs
 ```
@@ -94,31 +94,28 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph Producer
-        A[FD001 rows] --> B[Add Gaussian noise]
-        B --> C{Transport}
-        C -->|default| D[Redis XADD\ntelemetry:stream]
-        C -->|SOLACE_HOST set| E[Solace PubSub+\naircraft/engine/*/telemetry/cycle]
+        A[FD001 rows\nper-engine grouped] --> B[Risk-distributed\nlifecycle offset\n70/10/10/10]
+        B --> C[Virtual monotonic\ncycle counter\nper engine]
+        C --> D{Transport}
+        D -->|default| E[Redis XADD\ntelemetry:stream]
+        D -->|SOLACE_HOST set| F[Solace PubSub+\naircraft/engine/*/telemetry/cycle]
     end
 
     subgraph Consumer
-        D --> F[XREAD batch]
-        E --> F
-        F --> G[NormalizationFunction\nMinMax stateless]
-        G --> H[RollingWindowFunction\n30-cycle keyed buffer]
-        H --> I{Window full?}
-        I -->|yes| J[RedisSink\nengine:id:features]
-        I -->|yes| K[S3ParquetSink\nflush every 500]
-        I -->|no| L[accumulate]
+        E --> G[XREAD batch]
+        F --> G
+        G --> H[NormalizationFunction\nMinMax stateless]
+        H --> I[RollingWindowFunction\n30-cycle keyed deque]
+        I --> J{Window full?}
+        J -->|yes| K[RedisSink\nengine:id:features]
+        J -->|yes| L[S3ParquetSink\nflush every 500]
+        J -->|no| M[accumulate]
     end
 
     subgraph Inference
-        J --> M[FastAPI\n/predict/engine/id\n/ws/predictions]
+        K --> N[FastAPI\n/predict/engine/id\n/ws/predictions]
     end
 ```
-
-**Standalone consumer** (`streaming/pipeline/standalone_consumer.py`) — pure Python, no Flink cluster needed. Default mode.
-
-**PyFlink pipeline** (`streaming/pipeline/telemetry_pipeline.py`) — cluster mode with exactly-once checkpointing, RocksDB state backend, Solace JCSMP connector.
 
 ---
 
@@ -126,44 +123,42 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    subgraph Prediction Pathways
-        A[POST /predict\nnormalized 30×11 array] --> D
+    subgraph Pathways["Prediction Pathways"]
+        A[POST /predict\nnormalized 30×11] --> D
         B[POST /predict/raw\nraw sensor dicts] --> E[InferencePreprocessor\nscaler.transform] --> D
         C[GET /predict/engine/id\nRedis feature store] --> D
         F[POST /push → buffer\nGET /predict/stream/id] --> D
-        D[MC Dropout\n30 forward passes\nmean + confidence]
+        D[GRU Model\nbatch forward pass\ntraining=False]
     end
 
-    subgraph WebSocket Streams
-        G[/ws/predictions\n5s — all Redis engines]
-        H[/ws/telemetry\n2s — engine metadata]
-        I[/ws/alerts\n5s — HIGH+CRITICAL only]
+    subgraph WS["WebSocket Streams"]
+        G[/ws/predictions\n5s · all Redis engines\nbatched inference]
+        H[/ws/telemetry\n2s · engine metadata]
+        I[/ws/alerts\n5s · HIGH+CRITICAL only]
     end
 
-    subgraph Pipeline Retraining
+    subgraph Retrain["Pipeline Retraining"]
         J[POST /pipeline/run\nnon-blocking subprocess]
         K[GET /pipeline/status\nidle/running/success/failed]
         L[GET /pipeline/logs\nSSE line stream]
     end
 
-    subgraph Drift Reports
-        M[GET /drift/reports\nlist HTML files]
-        N[GET /drift/reports/filename\nserve HTML]
-    end
-
-    D --> G
-    D --> I
+    D --> G & I
+    G --> PROM[Prometheus metrics\nactive_engines · requests\nlatency · critical_gauge]
 ```
 
 ---
 
 ## Redis Key Schema
 
-```
-engine:{id}:features   bytes     float32 tensor (30×11 = 1320 bytes)   TTL 3600s
-engine:{id}:meta       hash      {cycle, event_time, window_size}       TTL 3600s
-engine:{id}:buffer     list      JSON sensor readings (push pathway)    TTL 3600s
-telemetry:stream       stream    Raw EngineEvent JSON (maxlen 50000)
+```mermaid
+erDiagram
+    FEATURE_STORE {
+        bytes engine_id_features "float32 tensor 30x11 = 1320 bytes · TTL 3600s"
+        hash engine_id_meta "cycle · event_time · window_size · n_sensors · TTL 3600s"
+        list engine_id_buffer "JSON sensor readings push pathway · TTL 3600s"
+        stream telemetry_stream "Raw EngineEvent JSON · maxlen 50000"
+    }
 ```
 
 ---
@@ -172,38 +167,36 @@ telemetry:stream       stream    Raw EngineEvent JSON (maxlen 50000)
 
 ```mermaid
 flowchart TB
-    subgraph Vue 3 Dashboard
-        A[FleetPage /]
-        B[EnginePage /engine/:id]
-        C[PipelinePage /pipeline]
-        D[MLOpsPage /mlops]
-        E[ReplayPage /replay]
+    subgraph Pages["Vue 3 Pages"]
+        P1[FleetPage /]
+        P2[EnginePage /engine/:id]
+        P3[PipelinePage /pipeline]
+        P4[MLOpsPage /mlops]
+        P5[ReplayPage /replay]
     end
 
-    subgraph State
-        F[engineStore\npredictions, telemetry, modelInfo]
-        G[alertStore\nalerts, acknowledgements]
+    subgraph State["Pinia Stores"]
+        ES[engineStore\npredictions · telemetry · modelInfo]
+        AS[alertStore\nalerts · acks]
     end
 
     subgraph Transport
-        H[useWebSockets\n/ws/predictions\n/ws/telemetry\n/ws/alerts]
-        I[Axios REST\napi.ts]
-        J[EventSource SSE\n/pipeline/logs]
-        K[fetch polling\n/predict/stream/id]
+        WS[useWebSockets\n3 streams]
+        REST[api.ts Axios]
+        SSE[EventSource\n/pipeline/logs]
+        POLL[fetch polling\n/predict/stream/id]
     end
 
     subgraph Backend
-        L[FastAPI :8000]
-        M[nginx proxy :5173→:80]
+        API[FastAPI :8000]
+        NGINX[nginx :80\nproxy → :8000]
     end
 
-    A & B & C & D & E --> F & G
-    H --> F & G
-    I --> F & G
-    J --> D
-    K --> E
-    F & G --> H & I
-    M --> L
+    P1 & P2 & P3 & P4 & P5 --> ES & AS
+    WS & REST --> ES & AS
+    SSE --> P4
+    POLL --> P5
+    NGINX --> API
 ```
 
 ---
@@ -212,30 +205,30 @@ flowchart TB
 
 ```mermaid
 graph TB
-    subgraph Docker Compose
-        subgraph Event Broker
+    subgraph Docker["Docker Compose — 13 services"]
+        subgraph Broker["Event Broker"]
             SOL[Solace PubSub+\n:8080 :55555]
         end
 
-        subgraph Stream Processing
-            PROD[telemetry-producer\nRedis Streams / Solace]
+        subgraph Streaming["Stream Processing"]
+            PROD[telemetry-producer\nRisk-distributed · Redis Streams]
             CONS[standalone-consumer\nNormalize → Window → Redis]
         end
 
-        subgraph Feature Store
+        subgraph Store["Feature Store"]
             RD[Redis :6379\nFeatures + Buffer + Stream]
         end
 
-        subgraph ML Services
-            API[inference-api :8000\nFastAPI + Retraining]
-            FLINK[Flink JobManager :8082]
+        subgraph ML["ML Services"]
+            API[inference-api :8000\nFastAPI + Retraining + Drift]
+            FLINK[Flink :8082\ncluster mode optional]
         end
 
-        subgraph Frontend
-            FE[frontend :5173\nVue 3 + nginx]
+        subgraph FE["Frontend"]
+            FRONT[frontend :5173\nVue 3 + nginx]
         end
 
-        subgraph Monitoring
+        subgraph Mon["Monitoring"]
             PROM[Prometheus :9090]
             GRAF[Grafana :3000]
             NODE[node-exporter :9100]
@@ -251,7 +244,7 @@ graph TB
     NODE --> PROM
     REDEX --> PROM
     PROM --> GRAF
-    FE --> API
+    FRONT --> API
 ```
 
 ---
@@ -261,27 +254,27 @@ graph TB
 ```mermaid
 flowchart TB
     subgraph Sources
-        A[FastAPI /metrics]
-        B[node-exporter :9100]
-        C[redis-exporter :9121]
+        A[FastAPI /metrics\nall 9 Prometheus metrics]
+        B[node-exporter :9100\nCPU · memory · disk · network]
+        C[redis-exporter :9121\nclients · memory · commands/s]
     end
 
     subgraph Collection
-        D[Prometheus scraper\n15s interval]
+        D[Prometheus\n15s scrape interval]
     end
 
     subgraph Visualization
-        E[Grafana\n15+ panels]
+        E[Grafana\n15+ panels · auto-provisioned]
     end
 
-    subgraph ML Monitoring
+    subgraph MLMonitoring["ML Monitoring"]
         F[Evidently AI 0.7\nKS-test + DataDriftPreset]
         G[reports/drift/*.html\nserved via /drift/reports/]
         H[MLOps page iframe\ninteractive dashboard]
     end
 
     subgraph Alerting
-        I[alerting_rules.yml\nCriticalEngine, HighLatency\nHighErrorRate, APIDown, RedisMemory]
+        I[alerting_rules.yml\nCriticalEngine · HighLatency\nHighErrorRate · APIDown · RedisMemory]
     end
 
     A & B & C --> D

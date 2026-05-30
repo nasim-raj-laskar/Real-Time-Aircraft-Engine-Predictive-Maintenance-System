@@ -31,9 +31,9 @@ failure_risk_score = Histogram(
     buckets=[i/10 for i in range(11)]
 )
 
-critical_engines_total = Counter(
+critical_engines_total = Gauge(
     'critical_engines_total',
-    'Total engines flagged as critical'
+    'Current number of engines flagged as critical'
 )
 
 # Model metrics

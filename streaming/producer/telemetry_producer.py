@@ -60,6 +60,20 @@ def _build_payload(parts: list) -> dict:
 # Small noise scale applied each loop pass so values drift naturally
 _NOISE_SCALE = 0.005
 
+# Risk distribution: (lifecycle_start, lifecycle_end, probability)
+# ~70% LOW (0-40%), ~10% MED (40-60%), ~10% HIGH (60-80%), ~10% CRIT (80-100%)
+_RISK_BUCKETS = [(0.0, 0.40, 0.70), (0.40, 0.60, 0.10), (0.60, 0.80, 0.10), (0.80, 1.0, 0.10)]
+
+
+def _pick_start_fraction(rng) -> float:
+    r = rng.random()
+    cumulative = 0.0
+    for lo, hi, weight in _RISK_BUCKETS:
+        cumulative += weight
+        if r < cumulative:
+            return rng.uniform(lo, hi)
+    return rng.uniform(0.80, 1.0)
+
 
 def run_producer(
     dataset_path: str = "Dataset/train_FD001.txt",
@@ -69,63 +83,81 @@ def run_producer(
     """
     Stream FD001 rows as EngineEvent JSON — loops forever.
 
-    Each pass through the dataset adds tiny Gaussian noise so sensor
-    values drift naturally, simulating real continuous telemetry.
+    Each engine starts at a random lifecycle position so the fleet is spread
+    across risk levels (~70% LOW, ~10% MED, ~10% HIGH, ~10% CRITICAL).
     Press Ctrl-C to stop.
-
-    Args:
-        dataset_path: Path to raw FD001 text file.
-        throttle_ms:  Sleep between publishes in ms (default 50 = 20 events/s).
-        target_queue: Queue to push into. Defaults to module-level _local_queue.
     """
+    import random as _rng_mod
     q = target_queue if target_queue is not None else _local_queue
-    lines = [l for l in Path(dataset_path).read_text().splitlines() if len(l.strip().split()) >= 26]
+    all_lines = [l for l in Path(dataset_path).read_text().splitlines() if len(l.strip().split()) >= 26]
+
+    # Group rows by engine id
+    engines: dict = {}
+    for line in all_lines:
+        parts = line.strip().split()
+        engines.setdefault(parts[0], []).append(parts)
 
     solace_host = os.getenv("SOLACE_HOST")
     publisher = _build_solace_publisher(solace_host) if solace_host else None
 
     emitted = 0
     loop = 0
-    rng = __import__("random")
+    rng = _rng_mod.Random()
 
-    print(f"[producer] Streaming {len(lines)} cycles/pass from {dataset_path} (loops forever, Ctrl-C to stop)")
+    print(f"[producer] {len(engines)} engines loaded from {dataset_path} (loops forever, Ctrl-C to stop)")
+
+    def _publish(payload: dict):
+        raw = json.dumps(payload).encode()
+        if publisher:
+            _solace_publish(publisher, payload["engine_id"], raw.decode())
+        elif target_queue is not None:
+            try:
+                q.put_nowait(raw)
+            except queue.Full:
+                q.put(raw)
+        else:
+            _redis_publish(raw)
+
+    # Per-engine state: current dataset index and virtual monotonic cycle counter
+    engine_idx    = {eid: int(_pick_start_fraction(rng) * len(rows)) for eid, rows in engines.items()}
+    engine_vcycle = {eid: 1 for eid in engines}
+
+    engine_list = list(engines.keys())
 
     try:
         while True:
             loop += 1
-            noise = _NOISE_SCALE * (loop - 1)  # drift grows slightly each pass
+            noise = _NOISE_SCALE * min(loop - 1, 10)
 
-            for line in lines:
-                parts = line.strip().split()
-                payload = _build_payload(parts)
+            # Emit one event per engine per tick (round-robin)
+            for eid in engine_list:
+                rows = engines[eid]
+                idx  = engine_idx[eid]
+                payload = _build_payload(rows[idx])
 
-                # Add small Gaussian noise to each sensor value
+                # Virtual monotonic cycle — rolling window never stalls
+                payload["cycle"] = engine_vcycle[eid]
+                engine_vcycle[eid] += 1
+
                 for k in payload["sensors"]:
                     payload["sensors"][k] += rng.gauss(0, noise) if noise > 0 else 0.0
+                _publish(payload)
 
-                raw = json.dumps(payload).encode()
-
-                if publisher:
-                    _solace_publish(publisher, payload["engine_id"], raw.decode())
-                elif target_queue is not None:
-                    # same-process mode: push to in-memory queue
-                    try:
-                        q.put_nowait(raw)
-                    except queue.Full:
-                        q.put(raw)
-                else:
-                    # cross-process mode: push to Redis stream
-                    _redis_publish(raw)
+                # Advance; wrap to a new random lifecycle position at end-of-life
+                next_idx = idx + 1
+                if next_idx >= len(rows):
+                    next_idx = int(_pick_start_fraction(rng) * len(rows))
+                engine_idx[eid] = next_idx
 
                 emitted += 1
 
-                if throttle_ms > 0:
-                    time.sleep(throttle_ms / 1000)
+            # Throttle once per full round (not per engine) — all 100 engines get
+            # events in rapid succession, then we sleep once.
+            if throttle_ms > 0:
+                time.sleep(throttle_ms / 1000)
 
-                if emitted % 1_000 == 0:
-                    print(f"[producer] Emitted {emitted} events (pass {loop})")
-
-            print(f"[producer] Pass {loop} complete — starting pass {loop + 1}")
+            if emitted % 5_000 == 0:
+                print(f"[producer] Emitted {emitted} events (loop {loop})")
 
     except KeyboardInterrupt:
         print(f"\n[producer] Stopped. Emitted {emitted} total events across {loop} passes.")

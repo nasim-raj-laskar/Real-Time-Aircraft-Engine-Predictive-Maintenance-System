@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, computed } from 'vue'
 import DashboardLayout from '../layouts/DashboardLayout.vue'
+import ModelArchDiagram from '../components/ModelArchDiagram.vue'
 import { useEngineStore } from '../stores/engineStore'
 import { getModelEvaluation, getDriftReports, triggerPipeline, getPipelineStatus } from '../services/api'
 
@@ -181,7 +182,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Model info + Architecture -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-[30%_70%] gap-4">
 
         <!-- Active Model -->
         <div class="bg-card border border-border rounded-lg p-4">
@@ -230,18 +231,7 @@ onUnmounted(() => {
         <!-- Architecture -->
         <div class="bg-card border border-border rounded-lg p-4">
           <h3 class="text-sm font-semibold text-gray-300 mb-3">Architecture</h3>
-          <div class="space-y-1 text-xs font-mono">
-            <div class="bg-bg rounded px-2 py-1 text-cyan-400">Input (batch, 30, 11)</div>
-            <div class="bg-bg rounded px-2 py-1 text-white">GRU 128 units, return_seq=True</div>
-            <div class="bg-bg rounded px-2 py-1 text-gray-500 pl-4">Dropout 0.2</div>
-            <div class="bg-bg rounded px-2 py-1 text-white">GRU 64 units, return_seq=True</div>
-            <div class="bg-bg rounded px-2 py-1 text-gray-500 pl-4">Dropout 0.2</div>
-            <div class="bg-bg rounded px-2 py-1 text-white">GRU 32 units</div>
-            <div class="bg-bg rounded px-2 py-1 text-gray-500 pl-4">Dropout 0.15</div>
-            <div class="bg-bg rounded px-2 py-1 text-white">Dense 32 (ReLU + L2)</div>
-            <div class="bg-bg rounded px-2 py-1 text-white">Dense 16 (ReLU + L2)</div>
-            <div class="bg-bg rounded px-2 py-1 text-green-400">Output 1 (Sigmoid) → RUL in [0,1]</div>
-          </div>
+          <ModelArchDiagram />
         </div>
       </div>
 
