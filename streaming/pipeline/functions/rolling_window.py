@@ -39,12 +39,6 @@ class RollingWindowFunction:
         """
         state = self._states.setdefault(event.engine_id, _EngineState())
 
-        # If cycle resets to 1 (producer looped), flush the window so stale
-        # end-of-life rows don't contaminate the next pass
-        if event.cycle == 1:
-            state.last_cycle = -1
-            state.window.clear()
-
         # Drop duplicates and late arrivals
         if event.cycle <= state.last_cycle:
             return None
