@@ -118,26 +118,24 @@ def run_producer(
         else:
             _redis_publish(raw)
 
-    # Per-engine state: current index and virtual cycle counter
-    engine_idx = {
-        eid: int(_pick_start_fraction(rng) * len(rows))
-        for eid, rows in engines.items()
-    }
-    # Virtual cycle: monotonically increasing per engine so rolling window never stalls
+    # Per-engine state: current dataset index and virtual monotonic cycle counter
+    engine_idx    = {eid: int(_pick_start_fraction(rng) * len(rows)) for eid, rows in engines.items()}
     engine_vcycle = {eid: 1 for eid in engines}
+
+    engine_list = list(engines.keys())
 
     try:
         while True:
             loop += 1
-            noise = _NOISE_SCALE * min(loop - 1, 10)  # cap drift
+            noise = _NOISE_SCALE * min(loop - 1, 10)
 
-            # One round-robin tick: emit one event per engine
-            for eid, rows in engines.items():
-                idx = engine_idx[eid]
-                parts = rows[idx]
-                payload = _build_payload(parts)
+            # Emit one event per engine per tick (round-robin)
+            for eid in engine_list:
+                rows = engines[eid]
+                idx  = engine_idx[eid]
+                payload = _build_payload(rows[idx])
 
-                # Override cycle with virtual monotonic counter so window never blocks
+                # Virtual monotonic cycle — rolling window never stalls
                 payload["cycle"] = engine_vcycle[eid]
                 engine_vcycle[eid] += 1
 
@@ -145,17 +143,20 @@ def run_producer(
                     payload["sensors"][k] += rng.gauss(0, noise) if noise > 0 else 0.0
                 _publish(payload)
 
-                # Advance index; when engine reaches end-of-life, wrap to a new random start
+                # Advance; wrap to a new random lifecycle position at end-of-life
                 next_idx = idx + 1
                 if next_idx >= len(rows):
                     next_idx = int(_pick_start_fraction(rng) * len(rows))
                 engine_idx[eid] = next_idx
 
                 emitted += 1
-                if throttle_ms > 0:
-                    time.sleep(throttle_ms / 1000)
 
-            if emitted % 1_000 == 0:
+            # Throttle once per full round (not per engine) — all 100 engines get
+            # events in rapid succession, then we sleep once.
+            if throttle_ms > 0:
+                time.sleep(throttle_ms / 1000)
+
+            if emitted % 5_000 == 0:
                 print(f"[producer] Emitted {emitted} events (loop {loop})")
 
     except KeyboardInterrupt:
