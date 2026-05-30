@@ -95,8 +95,6 @@ def _predict_all_engines(engine_ids: list) -> list:
         predicted_rul_cycles.observe(rul)
         failure_risk_score.observe(risk)
         prediction_confidence.observe(1.0)
-        if risk_level == "CRITICAL":
-            critical_engines_total.inc()
 
         results.append({
             "engine_id": eid,
@@ -107,6 +105,7 @@ def _predict_all_engines(engine_ids: list) -> list:
             "timestamp": now,
             "model_version": version,
         })
+    critical_engines_total.set(sum(1 for r in results if r["risk_level"] == "CRITICAL"))
     return results
 
 

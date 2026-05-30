@@ -94,7 +94,7 @@
         "overrides": []
       },
       "targets": [
-        { "expr": "increase(critical_engines_total[5m])", "legendFormat": "Critical (5m)", "refId": "A", "instant": true }
+        { "expr": "critical_engines_total", "legendFormat": "Critical Engines", "refId": "A", "instant": true }
       ]
     },
 

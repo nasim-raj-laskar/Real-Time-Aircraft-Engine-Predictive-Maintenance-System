@@ -1,20 +1,20 @@
 <script setup lang="ts">
 const layers = [
-  { type: 'input',   label: 'INPUT 30×11', color: '#00d9ff', width: 70,  height: 140 },
-  { type: 'gru',     label: 'GRU 128',     color: '#3b82f6', width: 55,  height: 190 },
-  { type: 'dropout', label: 'DROP 0.2',    color: '#a855f7', width: 24,  height: 160 },
-  { type: 'gru',     label: 'GRU 64',      color: '#2563eb', width: 50,  height: 150 },
-  { type: 'dropout', label: 'DROP 0.2',    color: '#a855f7', width: 24,  height: 130 },
-  { type: 'gru',     label: 'GRU 32',      color: '#1d4ed8', width: 42,  height: 110 },
-  { type: 'dropout', label: 'DROP 0.15',   color: '#9333ea', width: 22,  height: 90  },
-  { type: 'dense',   label: 'DENSE 32',    color: '#f59e0b', width: 34,  height: 80  },
-  { type: 'dense',   label: 'DENSE 16',    color: '#facc15', width: 28,  height: 60  },
-  { type: 'output',  label: 'OUT 1',       color: '#22c55e', width: 18,  height: 40  },
+  { type: 'input',   label: 'INPUT 30×11', color: '#00d9ff', width: 70,  height: 126 },
+  { type: 'gru',     label: 'GRU 128',     color: '#3b82f6', width: 55,  height: 171 },
+  { type: 'dropout', label: 'DROP 0.2',    color: '#a855f7', width: 24,  height: 144 },
+  { type: 'gru',     label: 'GRU 64',      color: '#2563eb', width: 50,  height: 135 },
+  { type: 'dropout', label: 'DROP 0.2',    color: '#a855f7', width: 24,  height: 117 },
+  { type: 'gru',     label: 'GRU 32',      color: '#1d4ed8', width: 42,  height: 99  },
+  { type: 'dropout', label: 'DROP 0.15',   color: '#9333ea', width: 22,  height: 81  },
+  { type: 'dense',   label: 'DENSE 32',    color: '#f59e0b', width: 34,  height: 72  },
+  { type: 'dense',   label: 'DENSE 16',    color: '#facc15', width: 28,  height: 54  },
+  { type: 'output',  label: 'OUT 1',       color: '#22c55e', width: 18,  height: 36  },
 ]
 
 const spacing = 92
 const startX  = 40
-const centerY = 180
+const centerY = 162
 
 function getX(index: number) {
   return startX + index * spacing
@@ -23,7 +23,7 @@ function getX(index: number) {
 
 <template>
   <div class="w-full overflow-x-auto rounded-xl border border-[#1e293b] bg-[#081121] p-5">
-    <svg width="1100" height="300" class="min-w-[1050px]">
+    <svg width="1100" height="270" class="min-w-[1050px]">
 
       <defs>
         <filter id="glow">
