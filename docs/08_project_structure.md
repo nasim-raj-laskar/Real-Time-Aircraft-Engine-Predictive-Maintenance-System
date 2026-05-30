@@ -11,18 +11,15 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 │   ├── RUL_FD001.txt
 │   └── Damage Propagation Modeling.pdf
 │
-├── docs/                           # This documentation (10 files)
-│
-├── notebook/
-│   └── test-rul.ipynb
+├── docs/                           # This documentation (11 files)
 │
 ├── config/                         # YAML pipeline configs
 │   ├── config.yaml                 # Paths and artifact locations
 │   ├── features.yaml               # Sensor columns, window size
-│   ├── model.yaml                  # GRU hyperparameters
-│   ├── params.yaml                 # Training parameters (epochs, batch size)
+│   ├── model.yaml                  # GRU hyperparameters (3-layer: 128→64→32)
+│   ├── params.yaml                 # Training parameters (epochs, batch size, LR)
 │   ├── redis.yaml                  # Redis connection + TTL
-│   ├── registor.yaml               # MLflow registry config
+│   ├── registor.yaml               # MLflow registry + promotion thresholds
 │   ├── schema.yaml                 # Data schema validation
 │   └── transform.yaml              # Scaler and transformation config
 │
@@ -48,7 +45,7 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 │   ├── inference/                  # FastAPI inference service
 │   │   ├── app.py                  # FastAPI entry point + middleware
 │   │   ├── routes.py               # All REST endpoints incl. pipeline + drift
-│   │   ├── ws.py                   # WebSocket endpoints (/ws/predictions, telemetry, alerts)
+│   │   ├── ws.py                   # WebSocket endpoints + batch prediction loop
 │   │   ├── predictor.py            # MC Dropout inference logic
 │   │   ├── preprocessor.py         # Raw sensor → normalized window
 │   │   ├── loader.py               # Artifact loading at startup
@@ -59,7 +56,7 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 │   │
 │   ├── monitoring/
 │   │   ├── drift_detector.py       # KS-test drift + Evidently 0.7 HTML reports
-│   │   └── drift_monitor.py        # Scheduled drift monitoring runner
+│   │   └── drift_monitor.py        # Manual drift monitoring runner
 │   │
 │   ├── cloud/
 │   │   └── s3.py                   # S3 client wrapper
@@ -75,29 +72,29 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 │   │   └── config_entity.py        # Config + request/response dataclasses
 │   │
 │   ├── utils/
-│   │   ├── common.py               # Helper functions (save_json, etc.)
+│   │   ├── common.py               # Helper functions
 │   │   ├── mlflow_setup.py         # DagsHub + MLflow initialization
 │   │   └── suppress_warnings.py
 │   │
 │   ├── logging/
-│   │   └── logger.py               # Pipeline logger (writes to logs/<timestamp>/)
+│   │   └── logger.py               # Pipeline logger
 │   │
 │   └── exception/
 │       └── exception.py            # CustomException with file + line info
 │
 ├── streaming/
 │   ├── producer/
-│   │   └── telemetry_producer.py   # Loops FD001, adds Gaussian noise, publishes to Redis Streams or Solace
+│   │   └── telemetry_producer.py   # Risk-distributed producer · Redis Streams + Solace
 │   │
 │   ├── pipeline/
-│   │   ├── standalone_consumer.py  # Pure Python consumer (no Flink needed)
+│   │   ├── standalone_consumer.py  # Pure Python consumer (default · no Flink needed)
 │   │   ├── telemetry_pipeline.py   # PyFlink entry point (cluster mode)
 │   │   ├── functions/
 │   │   │   ├── normalization.py    # Stateless MinMax per event
 │   │   │   └── rolling_window.py   # Per-engine 30-cycle keyed buffer
 │   │   └── sinks/
-│   │       ├── redis_sink.py       # Writes engine:{id}:features
-│   │       └── s3_parquet_sink.py  # Flushes every FLUSH_EVERY vectors
+│   │       ├── redis_sink.py       # Writes engine:{id}:features + meta
+│   │       └── s3_parquet_sink.py  # Hive-partitioned Parquet flush
 │   │
 │   ├── model/
 │   │   ├── engine_event.py         # EngineEvent dataclass
@@ -114,6 +111,10 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 │       │   ├── PipelinePage.vue    # /pipeline — Pipeline Monitor
 │       │   ├── MLOpsPage.vue       # /mlops — ML Observability + Retraining
 │       │   └── ReplayPage.vue      # /replay — Simulation Lab
+│       ├── components/
+│       │   ├── ModelArchDiagram.vue  # SVG GRU architecture diagram
+│       │   ├── cards/              # StatCard, EngineTable, AlertsPanel
+│       │   └── charts/             # RiskDistributionChart, RulBarChart
 │       ├── stores/
 │       │   ├── engineStore.ts      # Predictions, telemetry, model info
 │       │   └── alertStore.ts       # Alert list + acknowledgement
@@ -128,7 +129,7 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 ├── monitoring/
 │   ├── prometheus/
 │   │   ├── prometheus.yml          # Scrape config (inference-api, node, redis)
-│   │   └── alerting_rules.yml      # Alert rules
+│   │   └── alerting_rules.yml      # 5 alert rules
 │   └── grafana/
 │       ├── dashboards/
 │       │   └── aircraft_engine_monitoring.json   # 15+ panel dashboard
@@ -142,14 +143,14 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 ├── reports/
 │   └── drift/                      # Evidently HTML drift reports (mounted into container)
 │
-├── artifacts/                      # Generated by pipeline (mounted read-write into container)
+├── artifacts/                      # Generated by pipeline (mounted read-write)
 │   ├── data_ingestion/data/
 │   ├── data_validation/status.json
 │   ├── data_transformation/
-│   │   ├── processed/              # train/test Parquet
+│   │   ├── processed/
 │   │   └── scaler.pkl
 │   ├── data_feature_engineering/
-│   │   ├── X_train.npy, y_train.npy, X_val.npy, y_val.npy, X_test.npy, y_test.npy
+│   │   ├── X_train.npy · y_train.npy · X_val.npy · y_val.npy · X_test.npy · y_test.npy
 │   │   └── feature_config.json
 │   ├── model_trainer/
 │   │   ├── model.keras
@@ -161,14 +162,13 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 │       └── error_distribution.png
 │
 ├── logs/                           # Pipeline + inference logs (mounted into container)
-│
 ├── main.py                         # 7-stage ML pipeline runner
-├── app.py                          # Uvicorn entry point (imports src/inference/app.py)
-├── Dockerfile                      # Inference API image (Python 3.12-slim, multi-stage)
+├── app.py                          # Uvicorn entry point
+├── Dockerfile                      # Inference API image (Python 3.12-slim)
 ├── Dockerfile.streaming            # Producer + consumer image
 ├── Dockerfile.frontend             # Vue build + nginx image
 ├── nginx.conf                      # Reverse proxy (API + WS + drift + pipeline routes)
-├── docker-compose.yml              # Full stack orchestration
+├── docker-compose.yml              # Full 13-service stack
 ├── pyproject.toml                  # uv dependency management
 └── .env                            # AWS, DagsHub, MLflow credentials
 ```
@@ -177,48 +177,99 @@ Real-Time-Aircraft-Engine-Predictive-Maintenance-System/
 
 ## 7-Stage ML Pipeline
 
-Run with `python main.py` locally or trigger via `POST /pipeline/run` from the dashboard.
+```mermaid
+flowchart LR
+    S1["1\nData Ingestion\nS3 Bronze → local"] -->
+    S2["2\nData Validation\nSchema checks"] -->
+    S3["3\nData Transformation\nParquet + scaler.pkl"] -->
+    S4["4\nFeature Engineering\n30×11 NumPy sequences"] -->
+    S5["5\nModel Training\n3-layer GRU + MLflow"] -->
+    S6["6\nModel Evaluation\nRMSE · NASA · F1"] -->
+    S7["7\nModel Registry\nMLflow + S3 upload"]
 
-| Stage | Component | Output |
-|-------|-----------|--------|
-| 1 | Data Ingestion | Raw FD001 files from S3 → `artifacts/data_ingestion/` |
-| 2 | Data Validation | Schema + column checks → `artifacts/data_validation/status.json` |
-| 3 | Data Transformation | Parquet + scaler → `artifacts/data_transformation/` |
-| 4 | Feature Engineering | NumPy sequences → `artifacts/data_feature_engineering/` |
-| 5 | Model Training | GRU model + MLflow run → `artifacts/model_trainer/` |
-| 6 | Model Evaluation | RMSE, NASA score, F1, plots → `artifacts/model_evaluation/` |
-| 7 | Model Registry | MLflow registry + S3 artifacts → `artifacts/model_registry/` |
+    style S1 fill:#1e3a5f,color:#fff,stroke:#00d9ff
+    style S2 fill:#1e3a5f,color:#fff,stroke:#00d9ff
+    style S3 fill:#1e3a5f,color:#fff,stroke:#00d9ff
+    style S4 fill:#1e3a5f,color:#fff,stroke:#00d9ff
+    style S5 fill:#1e3a5f,color:#fff,stroke:#00d9ff
+    style S6 fill:#1e3a5f,color:#fff,stroke:#00d9ff
+    style S7 fill:#1e3a5f,color:#fff,stroke:#00d9ff
+```
 
 ---
 
 ## Docker Stack
 
-```bash
-docker compose up -d
+```mermaid
+graph TB
+    subgraph Streaming
+        PROD[telemetry-producer]
+        CONS[standalone-consumer]
+        SOL[solace :8080 :55555]
+        FLINK[flink-jobmanager :8082]
+        FLINKTM[flink-taskmanager]
+    end
+
+    subgraph Core
+        API[inference-api :8000]
+        RD[redis :6379]
+    end
+
+    subgraph Frontend
+        FE[frontend :5173\nVue 3 + nginx]
+    end
+
+    subgraph Monitoring
+        PROM[prometheus :9090]
+        GRAF[grafana :3000]
+        NODE[node-exporter :9100]
+        REDEX[redis-exporter :9121]
+    end
+
+    PROD --> RD
+    RD --> CONS
+    CONS --> RD
+    RD --> API
+    API --> PROM
+    NODE --> PROM
+    REDEX --> PROM
+    PROM --> GRAF
+    FE --> API
 ```
 
-| Service | Image | Port | Purpose |
-|---------|-------|------|---------|
-| `inference-api` | Custom (Dockerfile) | 8000 | FastAPI — inference + retraining + drift |
-| `redis` | redis:7-alpine | 6379 | Feature store + stream transport |
-| `solace` | solace/solace-pubsub-standard | 8080, 55555 | Event broker |
-| `flink-jobmanager` | flink:2.0 | 8082 | Flink Web UI |
-| `flink-taskmanager` | flink:2.0 | — | Flink task execution |
-| `telemetry-producer` | Custom (Dockerfile.streaming) | — | Streams FD001 → Redis Streams |
-| `standalone-consumer` | Custom (Dockerfile.streaming) | — | Consumer → Redis feature store |
-| `node-exporter` | prom/node-exporter | 9100 | System metrics |
-| `redis-exporter` | oliver006/redis_exporter | 9121 | Redis metrics |
-| `prometheus` | prom/prometheus | 9090 | Metrics collection |
-| `grafana` | grafana/grafana | 3000 | Dashboards |
-| `frontend` | Custom (Dockerfile.frontend) | 5173 | Vue 3 dashboard via nginx |
+| Service | Image | Port |
+|---------|-------|------|
+| `inference-api` | Custom (Dockerfile) | 8000 |
+| `redis` | redis:7-alpine | 6379 |
+| `solace` | solace/solace-pubsub-standard | 8080, 55555 |
+| `flink-jobmanager` | flink:2.0 | 8082 |
+| `flink-taskmanager` | flink:2.0 | — |
+| `telemetry-producer` | Custom (Dockerfile.streaming) | — |
+| `standalone-consumer` | Custom (Dockerfile.streaming) | — |
+| `node-exporter` | prom/node-exporter | 9100 |
+| `redis-exporter` | oliver006/redis_exporter | 9121 |
+| `prometheus` | prom/prometheus | 9090 |
+| `grafana` | grafana/grafana | 3000 |
+| `frontend` | Custom (Dockerfile.frontend) | 5173 |
 
-### Volume Mounts (inference-api)
+---
 
-| Host Path | Container Path | Mode | Purpose |
-|-----------|---------------|------|---------|
-| `./artifacts` | `/app/artifacts` | rw | Pipeline writes new model artifacts here |
-| `./logs` | `/app/logs` | rw | Pipeline + inference logs |
-| `./reports` | `/app/reports` | rw | Evidently drift reports served via API |
+## Key Design Decisions
+
+| Decision | Choice | Reason |
+|----------|--------|--------|
+| Model architecture | 3-layer GRU (128→64→32) | Third layer adds compression before dense head |
+| Confidence estimation | MC Dropout (30 passes) | Uncertainty without separate ensemble |
+| RUL clip | 125 cycles | Standard in literature, focuses on degradation window |
+| Window size | 30 cycles | Balances temporal context vs. noise |
+| Stream transport | Redis Streams (default) | No external broker needed in Docker stack |
+| Event broker | Solace PubSub+ (optional) | Multi-protocol, no ZooKeeper, hardware routing |
+| Online feature store | Redis | Sub-millisecond reads, TTL-based expiry |
+| Offline store | S3 Parquet (Hive-partitioned) | Columnar, efficient for batch retraining reads |
+| Model registry | MLflow + DagsHub | Open source, remote tracking, versioning |
+| `critical_engines_total` | Gauge (not Counter) | Reflects current snapshot, not running total |
+| Producer throttle | Once per round (not per engine) | All 100 engines fill windows quickly on startup |
+| Dependency management | uv | Fast, modern Python package manager |
 
 ---
 
@@ -242,21 +293,3 @@ python main.py
 # Or trigger from dashboard
 curl -X POST http://localhost:8000/pipeline/run
 ```
-
----
-
-## Key Design Decisions
-
-| Decision | Choice | Reason |
-|----------|--------|--------|
-| Model architecture | 3-layer GRU (128→64→32) | Handles temporal sequences, lighter than Transformer |
-| Confidence estimation | MC Dropout (30 passes) | Uncertainty without separate ensemble |
-| RUL clip | 125 cycles | Standard in literature, focuses on degradation window |
-| Window size | 30 cycles | Balances temporal context vs. noise |
-| Event broker | Solace PubSub+ | Multi-protocol, no ZooKeeper, hardware-accelerated routing |
-| Stream transport (local) | Redis Streams | No broker needed for producer↔consumer in same stack |
-| Online feature store | Redis | Sub-millisecond reads, TTL-based expiry |
-| Offline store | S3 Parquet (Hive-partitioned) | Columnar, efficient for batch retraining reads |
-| Model registry | MLflow + DagsHub | Open source, remote tracking, versioning |
-| Dependency management | uv | Fast, modern Python package manager |
-| Artifacts mount | read-write | Required for in-container retraining |
