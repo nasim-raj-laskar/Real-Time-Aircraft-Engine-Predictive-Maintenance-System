@@ -254,14 +254,11 @@ async def predict_from_feature_store(engine_id: str):
         )
         raise HTTPException(status_code=404, detail=detail)
 
-    features = list(_config.get("features", []))
-    sensor_data = [
-        {features[j]: float(window[i, j]) for j in range(len(features))}
-        for i in range(window.shape[0])
-    ]
-    raw = RawSensorData(engine_id=engine_id, sensor_data=sensor_data)
+    # Data from Redis is already normalized by the streaming NormalizationFunction —
+    # use run_prediction (pre-normalized path) to avoid double-normalization.
+    normalized_data = SensorData(engine_id=engine_id, sensor_data=window.tolist())
     try:
-        result = run_raw_prediction(raw, _model, _scaler, _config)
+        result = run_prediction(normalized_data, _model, _config)
     except HTTPException:
         raise
     except Exception as e:
