@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 from pyflink.datastream import StreamExecutionEnvironment, CheckpointingMode
-from pyflink.datastream.functions import MapFunction, KeyedProcessFunction, SinkFunction, RuntimeContext
+from pyflink.datastream.functions import MapFunction, KeyedProcessFunction, SinkFunction, RuntimeContext, RichSourceFunction
 from pyflink.datastream.state import ListStateDescriptor, ValueStateDescriptor
 from pyflink.common import WatermarkStrategy, Duration
 from pyflink.common.typeinfo import Types
@@ -73,13 +73,8 @@ class RollingWindowProcess(KeyedProcessFunction):
     def process_element(self, event: EngineEvent, ctx, out):
         last = self._last_cycle.value()
 
-        # Reset on producer loop-back (cycle resets to 1)
-        if event.cycle == 1:
-            self._last_cycle.update(-1)
-            self._buffer.clear()
-            last = -1
-
         # Drop duplicates and out-of-order events (at-least-once re-delivery guard)
+        # Producer uses a virtual monotonic cycle counter so we never reset on cycle==1
         if last is not None and event.cycle <= last:
             return
         self._last_cycle.update(event.cycle)
@@ -144,11 +139,12 @@ class S3CheckpointSink(SinkFunction):
 
 # ── Redis Streams source (default, no broker needed) ─────────────────────────
 
-class RedisStreamSourceFunction(MapFunction):
-    """Reads raw event bytes from a Redis Stream (XREAD).
+class RedisStreamSourceFunction(RichSourceFunction):
+    """Proper Flink RichSourceFunction that polls Redis Streams via XREAD.
 
-    Used as a polling source when SOLACE_HOST is not set.
-    Wraps the same Redis stream that the standalone producer writes to.
+    - Opens one Redis connection per parallel slot via open()
+    - cancel() signals the run loop to stop cleanly (Flink lifecycle)
+    - Restarts from last_id=0 on recovery (at-least-once)
     """
 
     def open(self, runtime_context: RuntimeContext):
@@ -156,37 +152,35 @@ class RedisStreamSourceFunction(MapFunction):
         url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         self._rc = redis.from_url(url, decode_responses=False)
         self._last_id = "0"
+        self._running = True
 
-    def map(self, value):
-        # passthrough — actual reading is done in the source iterator
-        return value
-
-
-def _build_redis_stream_source(env: StreamExecutionEnvironment):
-    """Creates a Flink source from Redis Streams via a Python iterator source."""
-    import redis
-
-    url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    rc = redis.from_url(url, decode_responses=False)
-    last_id = ["0"]  # mutable reference for closure
-
-    def _event_iter():
-        while True:
+    def run(self, ctx):
+        while self._running:
             try:
-                results = rc.xread({REDIS_STREAM_KEY: last_id[0]}, count=200, block=1000)
+                results = self._rc.xread({REDIS_STREAM_KEY: self._last_id}, count=200, block=1000)
                 if not results:
                     continue
                 messages = results[0][1]
-                last_id[0] = messages[-1][0]
-                if isinstance(last_id[0], bytes):
-                    last_id[0] = last_id[0].decode()
+                self._last_id = messages[-1][0]
+                if isinstance(self._last_id, bytes):
+                    self._last_id = self._last_id.decode()
                 for _, fields in messages:
-                    yield fields[b"data"]
+                    ctx.collect(fields[b"data"])
             except Exception as e:
-                print(f"[source] Redis read error: {e}")
+                print(f"[redis-source] XREAD error: {e}")
                 time.sleep(1)
 
-    return env.from_collection(_event_iter(), type_info=Types.PICKLED_BYTE_ARRAY())
+    def cancel(self):
+        self._running = False
+
+
+def _build_redis_stream_source(env: StreamExecutionEnvironment):
+    """Adds RedisStreamSourceFunction to the Flink env and returns the DataStream."""
+    return (
+        env.add_source(RedisStreamSourceFunction(), type_info=Types.PICKLED_BYTE_ARRAY())
+        .name("redis-stream-source")
+        .set_parallelism(1)  # single reader — Redis Streams is not partitioned
+    )
 
 
 # ── Solace source (optional, requires JAR on classpath) ──────────────────────

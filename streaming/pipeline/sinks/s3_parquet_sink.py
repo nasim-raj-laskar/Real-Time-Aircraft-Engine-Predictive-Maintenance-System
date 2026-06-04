@@ -1,5 +1,6 @@
 import io
 import os
+import uuid
 from datetime import datetime, timezone
 from typing import List
 
@@ -41,6 +42,7 @@ class S3ParquetSink:
         self._prefix = prefix
         self._buffer: List[FeatureVector] = []
         self._part = 0
+        self._run_id = uuid.uuid4().hex[:8]  # unique per process lifetime, prevents key collisions on restart
 
         self._s3 = boto3.client(
             "s3",
@@ -75,7 +77,7 @@ class S3ParquetSink:
         pq.write_table(pa.Table.from_pydict(rows, schema=_SCHEMA), buf, compression="snappy")
         buf.seek(0)
 
-        key = f"{self._prefix}/date={date}/hour={hour}/part-{self._part}.parquet"
+        key = f"{self._prefix}/date={date}/hour={hour}/part-{self._run_id}-{self._part}.parquet"
         self._s3.put_object(Bucket=self._bucket, Key=key, Body=buf.getvalue())
 
         n = len(self._buffer)

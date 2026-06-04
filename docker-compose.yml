@@ -59,19 +59,19 @@ services:
     environment:
       username_admin_globalaccesslevel: admin
       username_admin_password: admin
-      system_scaling_maxconnectioncount: "1000"
-    shm_size: "2g"
+      system_scaling_maxconnectioncount: "100"
+    shm_size: "1g"
     ulimits:
       core: -1
       nofile:
-        soft: 2448
-        hard: 38048
+        soft: 1048576
+        hard: 1048576
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/SEMP/v2/config"]
       interval: 15s
       timeout: 10s
-      retries: 8
-      start_period: 30s
+      retries: 12
+      start_period: 60s
     restart: unless-stopped
     networks:
       - aircraft-network
@@ -88,8 +88,11 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
         execution.checkpointing.interval: 30000
-        state.backend: hashmap
+        state.backend: rocksdb
+        state.checkpoints.dir: s3://aircraft-engine-data/flink-checkpoints/
         python.executable: python3
+    volumes:
+      - flink-jars:/opt/flink/lib/extra
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/overview"]
       interval: 15s
@@ -110,8 +113,11 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
         taskmanager.memory.process.size: 2g
-        state.backend: hashmap
+        state.backend: rocksdb
+        state.checkpoints.dir: s3://aircraft-engine-data/flink-checkpoints/
         python.executable: python3
+    volumes:
+      - flink-jars:/opt/flink/lib/extra
     depends_on:
       flink-jobmanager:
         condition: service_healthy
@@ -119,8 +125,7 @@ services:
     networks:
       - aircraft-network
 
-  # ── Telemetry Producer ───────────────────────────────────────────────────────
-  # Streams FD001 rows into Redis Streams (default) or Solace (if SOLACE_HOST set)
+  # ── Telemetry Producer — publishes to Solace PubSub+ ────────────────────────
   telemetry-producer:
     build:
       context: .
@@ -130,38 +135,74 @@ services:
     command: python3 -m streaming.producer.telemetry_producer --dataset artifacts/data_ingestion/data/train_FD001.txt --throttle 50
     environment:
       REDIS_URL: redis://redis:6379/0
-      # Uncomment to publish to Solace instead of Redis Streams:
-      # SOLACE_HOST: tcp://solace:55555
-      # SOLACE_VPN: default
-      # SOLACE_USERNAME: admin
-      # SOLACE_PASSWORD: admin
+      SOLACE_HOST: tcp://solace:55555
+      SOLACE_VPN: default
+      SOLACE_USERNAME: admin
+      SOLACE_PASSWORD: admin
     depends_on:
-      redis:
-        condition: service_healthy
+      solace-provisioner:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - aircraft-network
 
-  # ── Standalone Consumer (Python pipeline — no Flink cluster needed) ──────────
-  # Reads from Redis Streams → normalize → rolling window → Redis feature store → S3
-  standalone-consumer:
+  # ── Solace Queue Provisioner (one-shot — runs once after Solace is healthy) ──
+  solace-provisioner:
+    image: curlimages/curl:latest
+    container_name: aircraft-solace-provisioner
+    volumes:
+      - ./scripts/provision_solace_queues.sh:/provision.sh:ro
+    entrypoint: ["/bin/sh", "/provision.sh"]
+    environment:
+      SOLACE_HOST: http://solace:8080
+      SOLACE_VPN: default
+      SOLACE_USER: admin
+      SOLACE_PASS: admin
+    depends_on:
+      solace:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - aircraft-network
+
+  # ── Flink Job Submitter (one-shot — submits PyFlink job after provisioning) ──
+  flink-job-submitter:
     build:
       context: .
       dockerfile: Dockerfile.streaming
-    container_name: aircraft-consumer
+    container_name: aircraft-flink-submitter
     env_file: .env
-    command: python3 -m streaming.pipeline.standalone_consumer --s3
+    command:
+      - bash
+      - -c
+      - |
+        echo '[submitter] Waiting for Flink JobManager...' &&
+        until curl -sf http://flink-jobmanager:8081/overview; do sleep 3; done &&
+        echo '[submitter] Submitting PyFlink job...' &&
+        flink run -m flink-jobmanager:8081 -py streaming/pipeline/telemetry_pipeline.py --parallelism 4 -pyfs streaming/ -j /opt/flink/lib/extra/flink-connector-solace-1.1.0.jar &&
+        echo '[submitter] Job submitted successfully.'
     environment:
       REDIS_URL: redis://redis:6379/0
-      S3_BUCKET: ${AWS_S3_BUCKET:-aircraft-engine-data}
+      FLINK_HOME: /opt/flink
+      SOLACE_HOST: tcp://solace:55555
+      SOLACE_VPN: default
+      SOLACE_USERNAME: admin
+      SOLACE_PASSWORD: admin
+      SOLACE_QUEUE_NAME: flink.feature.processor
+      SOLACE_CONNECTOR_JAR: /opt/flink/lib/extra/flink-connector-solace-1.1.0.jar
+      ENABLE_S3_SINK: "true"
       FLUSH_EVERY: "500"
-      # Uncomment to consume from Solace instead of Redis Streams:
-      # SOLACE_HOST: tcp://solace:55555
-      # SOLACE_QUEUE_NAME: flink.feature.processor
+      FLINK_CHECKPOINT_DIR: s3://aircraft-engine-data/flink-checkpoints/
+    volumes:
+      - flink-jars:/opt/flink/lib/extra
     depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+      solace-provisioner:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
-    restart: unless-stopped
+    restart: "no"
     networks:
       - aircraft-network
 
@@ -253,3 +294,4 @@ networks:
 
 volumes:
   redis-data:
+  flink-jars:  # shared volume for Solace connector JAR between submitter and Flink nodes

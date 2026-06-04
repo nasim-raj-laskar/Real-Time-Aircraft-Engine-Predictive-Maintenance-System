@@ -89,7 +89,14 @@ def run_producer(
     """
     import random as _rng_mod
     q = target_queue if target_queue is not None else _local_queue
-    all_lines = [l for l in Path(dataset_path).read_text().splitlines() if len(l.strip().split()) >= 26]
+    dataset = Path(dataset_path)
+    if not dataset.exists():
+        raise FileNotFoundError(
+            f"[producer] Dataset not found: {dataset.resolve()}\n"
+            f"Ensure artifacts/data_ingestion/data/train_FD001.txt is present "
+            f"or pass --dataset with the correct path."
+        )
+    all_lines = [l for l in dataset.read_text().splitlines() if len(l.strip().split()) >= 26]
 
     # Group rows by engine id
     engines: dict = {}
