@@ -44,13 +44,4 @@ COPY src/ ./src/
 COPY config/ ./config/
 COPY artifacts/data_ingestion/ ./artifacts/data_ingestion/
 
-# Download Solace Flink connector JAR so it's available in the image.
-# The flink-jars volume is mounted at /opt/flink/lib/extra in docker-compose,
-# so the submitter copies the JAR there on first run.
-RUN mkdir -p /opt/flink/lib/extra && \
-    curl -fsSL \
-      "https://github.com/SolaceLabs/solace-apache-flink-connector/releases/download/v1.1.0/flink-connector-solace-1.1.0.jar" \
-      -o /opt/flink/lib/extra/flink-connector-solace-1.1.0.jar || \
-    echo "[WARNING] Solace JAR download failed — place flink-connector-solace-1.1.0.jar at /opt/flink/lib/extra/ manually"
-
 RUN mkdir -p logs

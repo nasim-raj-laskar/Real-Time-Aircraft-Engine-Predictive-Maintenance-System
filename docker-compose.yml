@@ -179,7 +179,7 @@ services:
         echo '[submitter] Waiting for Flink JobManager...' &&
         until curl -sf http://flink-jobmanager:8081/overview; do sleep 3; done &&
         echo '[submitter] Submitting PyFlink job...' &&
-        flink run -m flink-jobmanager:8081 -py streaming/pipeline/telemetry_pipeline.py --parallelism 4 -pyfs streaming/ -j /opt/flink/lib/extra/flink-connector-solace-1.1.0.jar &&
+        flink run -m flink-jobmanager:8081 -py streaming/pipeline/telemetry_pipeline.py --parallelism 4 -pyfs streaming/ &&
         echo '[submitter] Job submitted successfully.'
     environment:
       REDIS_URL: redis://redis:6379/0
@@ -189,12 +189,9 @@ services:
       SOLACE_USERNAME: admin
       SOLACE_PASSWORD: admin
       SOLACE_QUEUE_NAME: flink.feature.processor
-      SOLACE_CONNECTOR_JAR: /opt/flink/lib/extra/flink-connector-solace-1.1.0.jar
       ENABLE_S3_SINK: "true"
       FLUSH_EVERY: "500"
       FLINK_CHECKPOINT_DIR: s3://aircraft-engine-data/flink-checkpoints/
-    volumes:
-      - flink-jars:/opt/flink/lib/extra
     depends_on:
       flink-jobmanager:
         condition: service_healthy
