@@ -66,6 +66,8 @@ services:
       nofile:
         soft: 1048576
         hard: 1048576
+    volumes:
+      - solace-data:/var/lib/solace
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/SEMP/v2/config"]
       interval: 20s
@@ -165,7 +167,37 @@ services:
     networks:
       - aircraft-network
 
-  #  Flink Job Submitter (one-shot — submits PyFlink job after provisioning) 
+  standalone-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.streaming
+    container_name: aircraft-consumer
+    env_file: .env
+    command: python3 -m streaming.pipeline.standalone_consumer --s3
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      S3_BUCKET: ${AWS_S3_BUCKET:-aircraft-engine-data}
+      FLUSH_EVERY: "500"
+      SOLACE_HOST: tcp://solace:55555
+      SOLACE_VPN: default
+      SOLACE_USERNAME: admin
+      SOLACE_PASSWORD: admin
+      SOLACE_QUEUE_NAME: flink.feature.processor
+    depends_on:
+      solace-provisioner:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import redis, sys; r=redis.from_url('redis://redis:6379/0'); sys.exit(0 if r.ping() else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - aircraft-network
+
   flink-job-submitter:
     build:
       context: .
@@ -179,11 +211,12 @@ services:
         echo '[submitter] Waiting for Flink JobManager...' &&
         until curl -sf http://flink-jobmanager:8081/overview; do sleep 3; done &&
         echo '[submitter] Submitting PyFlink job...' &&
-        flink run -m flink-jobmanager:8081 -py streaming/pipeline/telemetry_pipeline.py --parallelism 4 -pyfs streaming/ &&
+        cd /app && flink run -m flink-jobmanager:8081 -py streaming/pipeline/telemetry_pipeline.py --parallelism 4 -pyfs /app &&
         echo '[submitter] Job submitted successfully.'
     environment:
       REDIS_URL: redis://redis:6379/0
       FLINK_HOME: /opt/flink
+      PYFLINK_PYTHON: /app/.venv/bin/python3
       SOLACE_HOST: tcp://solace:55555
       SOLACE_VPN: default
       SOLACE_USERNAME: admin
@@ -291,4 +324,5 @@ networks:
 
 volumes:
   redis-data:
-  flink-jars:  # shared volume for Solace connector JAR between submitter and Flink nodes
+  flink-jars:
+  solace-data:  # persists Solace queue config across container restarts

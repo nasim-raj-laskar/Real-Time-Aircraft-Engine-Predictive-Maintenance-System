@@ -146,19 +146,27 @@ def _solace_event_iter():
         service_properties as SP,
         authentication_properties as AUTH,
     )
-    service = MessagingService.builder().from_properties({
+    props = {
         TL.HOST: os.getenv("SOLACE_HOST"),
         SP.VPN_NAME: os.getenv("SOLACE_VPN", "default"),
         AUTH.SCHEME_BASIC_USER_NAME: os.getenv("SOLACE_USERNAME", "admin"),
         AUTH.SCHEME_BASIC_PASSWORD: os.getenv("SOLACE_PASSWORD", "admin"),
-    }).build()
-    service.connect()
-    q = Queue.durable_exclusive_queue(
-        os.getenv("SOLACE_QUEUE_NAME", "flink.feature.processor")
-    )
-    receiver = service.create_persistent_message_receiver_builder().build(q)
-    receiver.start()
-    print(f"[solace-source] Connected to {os.getenv('SOLACE_HOST')}, consuming from {os.getenv('SOLACE_QUEUE_NAME', 'flink.feature.processor')}")
+    }
+    queue_name = os.getenv("SOLACE_QUEUE_NAME", "flink.feature.processor")
+
+    while True:
+        try:
+            service = MessagingService.builder().from_properties(props).build()
+            service.connect()
+            q = Queue.durable_exclusive_queue(queue_name)
+            receiver = service.create_persistent_message_receiver_builder().build(q)
+            receiver.start()
+            print(f"[solace-source] Connected, consuming from {queue_name}")
+            break
+        except Exception as e:
+            print(f"[solace-source] Connection/queue error: {e} — retrying in 10s")
+            time.sleep(10)
+
     try:
         while True:
             try:
@@ -169,7 +177,7 @@ def _solace_event_iter():
                 receiver.ack(msg)
                 yield payload
             except Exception as e:
-                print(f"[solace-source] Error: {e}")
+                print(f"[solace-source] Receive error: {e}")
                 time.sleep(1)
     finally:
         receiver.terminate()

@@ -140,6 +140,7 @@ def _stream_read(rc, last_id: str):
 # ── Optional Solace integration ───────────────────────────────────────────────
 
 def _build_solace_receiver():
+    import time
     try:
         from solace.messaging.messaging_service import MessagingService
         from solace.messaging.resources.queue import Queue
@@ -148,17 +149,25 @@ def _build_solace_receiver():
             service_properties as SP,
             authentication_properties as AUTH,
         )
-        service = MessagingService.builder().from_properties({
+        props = {
             TL.HOST: os.getenv("SOLACE_HOST"),
             SP.VPN_NAME: os.getenv("SOLACE_VPN", "default"),
             AUTH.SCHEME_BASIC_USER_NAME: os.getenv("SOLACE_USERNAME", "admin"),
             AUTH.SCHEME_BASIC_PASSWORD: os.getenv("SOLACE_PASSWORD", "admin"),
-        }).build()
-        service.connect()
-        q = Queue.durable_exclusive_queue(os.getenv("SOLACE_QUEUE_NAME", "flink.feature.processor"))
-        recv = service.create_persistent_message_receiver_builder().build(q)
-        recv.start()
-        return (service, recv)
+        }
+        queue_name = os.getenv("SOLACE_QUEUE_NAME", "flink.feature.processor")
+        while True:
+            try:
+                service = MessagingService.builder().from_properties(props).build()
+                service.connect()
+                q = Queue.durable_exclusive_queue(queue_name)
+                recv = service.create_persistent_message_receiver_builder().build(q)
+                recv.start()
+                print(f"[consumer] Connected to Solace, consuming from {queue_name}")
+                return (service, recv)
+            except Exception as e:
+                print(f"[consumer] Solace connect/queue error: {e} — retrying in 10s")
+                time.sleep(10)
     except ImportError:
         print("[consumer] solace-pubsubplus not installed")
         return None
@@ -169,7 +178,9 @@ def _solace_batch(receiver_tuple):
     msg = recv.receive_message(timeout=1_000)
     if msg is None:
         return []
-    return [msg.get_payload_as_bytes()]
+    payload = msg.get_payload_as_bytes()
+    recv.ack(msg)
+    return [payload]
 
 
 if __name__ == "__main__":
