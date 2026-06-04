@@ -1,6 +1,6 @@
 services:
 
-  # ── Inference API ────────────────────────────────────────────────────────────
+  #  Inference API 
   inference-api:
     build:
       context: .
@@ -28,7 +28,7 @@ services:
     networks:
       - aircraft-network
 
-  # ── Redis (online feature store + stream transport) ──────────────────────────
+  #  Redis (online feature store + stream transport) 
   redis:
     image: redis:7-alpine
     container_name: aircraft-redis
@@ -46,7 +46,7 @@ services:
     networks:
       - aircraft-network
 
-  # ── Solace PubSub+ (event broker) ────────────────────────────────────────────
+  #  Solace PubSub+ (event broker) 
   solace:
     image: solace/solace-pubsub-standard:latest
     container_name: aircraft-solace
@@ -68,15 +68,15 @@ services:
         hard: 1048576
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/SEMP/v2/config"]
-      interval: 15s
-      timeout: 10s
-      retries: 12
-      start_period: 60s
+      interval: 20s
+      timeout: 15s
+      retries: 15
+      start_period: 120s
     restart: unless-stopped
     networks:
       - aircraft-network
 
-  # ── Flink JobManager ─────────────────────────────────────────────────────────
+  # Flink JobManager 
   flink-jobmanager:
     image: flink:2.0-scala_2.12-java17
     container_name: aircraft-flink-jobmanager
@@ -103,7 +103,7 @@ services:
     networks:
       - aircraft-network
 
-  # ── Flink TaskManager ────────────────────────────────────────────────────────
+  #  Flink TaskManager 
   flink-taskmanager:
     image: flink:2.0-scala_2.12-java17
     container_name: aircraft-flink-taskmanager
@@ -125,7 +125,7 @@ services:
     networks:
       - aircraft-network
 
-  # ── Telemetry Producer — publishes to Solace PubSub+ ────────────────────────
+  #  Telemetry Producer — publishes to Solace PubSub+ 
   telemetry-producer:
     build:
       context: .
@@ -146,7 +146,7 @@ services:
     networks:
       - aircraft-network
 
-  # ── Solace Queue Provisioner (one-shot — runs once after Solace is healthy) ──
+  #  Solace Queue Provisioner (one-shot — runs once after Solace is healthy) 
   solace-provisioner:
     image: curlimages/curl:latest
     container_name: aircraft-solace-provisioner
@@ -160,12 +160,12 @@ services:
       SOLACE_PASS: admin
     depends_on:
       solace:
-        condition: service_healthy
+        condition: service_started
     restart: "no"
     networks:
       - aircraft-network
 
-  # ── Flink Job Submitter (one-shot — submits PyFlink job after provisioning) ──
+  #  Flink Job Submitter (one-shot — submits PyFlink job after provisioning) 
   flink-job-submitter:
     build:
       context: .
@@ -198,15 +198,15 @@ services:
     depends_on:
       flink-jobmanager:
         condition: service_healthy
-      solace-provisioner:
-        condition: service_completed_successfully
+      solace:
+        condition: service_started
       redis:
         condition: service_healthy
     restart: "no"
     networks:
       - aircraft-network
 
-  # ── Monitoring ───────────────────────────────────────────────────────────────
+  #  Monitoring 
   node-exporter:
     image: prom/node-exporter:latest
     container_name: aircraft-node-exporter
@@ -270,7 +270,7 @@ services:
     networks:
       - aircraft-network
 
-  # ── Frontend Dashboard ──────────────────────────────────────────────────────
+  #  Frontend Dashboard 
   frontend:
     build:
       context: .
