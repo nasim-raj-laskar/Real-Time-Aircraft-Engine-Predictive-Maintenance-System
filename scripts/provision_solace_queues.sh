@@ -50,8 +50,9 @@ create_queue() {
       \"ingressEnabled\": true,
       \"egressEnabled\": true,
       \"maxMsgSpoolUsage\": 512,
-      \"maxTtl\": 60,
+      \"maxTtl\": 10,
       \"respectTtlEnabled\": true,
+      \"maxDeliveredUnackedMsgsPerFlow\": 1000,
       \"replayStartLocation\": \"beginning\"
       ${extra}
     }")
