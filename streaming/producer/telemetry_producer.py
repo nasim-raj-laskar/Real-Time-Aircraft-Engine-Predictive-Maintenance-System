@@ -219,7 +219,7 @@ def _solace_publish(publisher_tuple, engine_id: str, raw: str):
     from solace.messaging.resources.topic import Topic
     service, pub = publisher_tuple
     topic = Topic.of(f"{TOPIC_PREFIX}{engine_id}{TOPIC_SUFFIX}")
-    msg = service.message_builder().build(raw.encode("utf-8"))
+    msg = service.message_builder().build(raw)
     pub.publish(msg, topic)
 
 

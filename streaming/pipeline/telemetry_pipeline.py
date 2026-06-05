@@ -133,93 +133,61 @@ class S3CheckpointSink(SinkFunction):
         self._sink.close()
 
 
-# -- Solace source (Python generator -- no JAR required) ---------------------
-
-def _solace_event_iter():
-    """Blocking generator that yields raw event bytes from a Solace durable queue.
-    Runs inside env.from_collection() on a single thread.
-    """
-    from solace.messaging.messaging_service import MessagingService
-    from solace.messaging.resources.queue import Queue
-    from solace.messaging.config.solace_properties import (
-        transport_layer_properties as TL,
-        service_properties as SP,
-        authentication_properties as AUTH,
-    )
-    props = {
-        TL.HOST: os.getenv("SOLACE_HOST"),
-        SP.VPN_NAME: os.getenv("SOLACE_VPN", "default"),
-        AUTH.SCHEME_BASIC_USER_NAME: os.getenv("SOLACE_USERNAME", "admin"),
-        AUTH.SCHEME_BASIC_PASSWORD: os.getenv("SOLACE_PASSWORD", "admin"),
-    }
-    queue_name = os.getenv("SOLACE_QUEUE_NAME", "flink.feature.processor")
-
-    while True:
-        try:
-            service = MessagingService.builder().from_properties(props).build()
-            service.connect()
-            q = Queue.durable_exclusive_queue(queue_name)
-            receiver = service.create_persistent_message_receiver_builder().build(q)
-            receiver.start()
-            print(f"[solace-source] Connected, consuming from {queue_name}")
-            break
-        except Exception as e:
-            print(f"[solace-source] Connection/queue error: {e} — retrying in 10s")
-            time.sleep(10)
-
-    try:
-        while True:
-            try:
-                msg = receiver.receive_message(timeout=1_000)
-                if msg is None:
-                    continue
-                payload = msg.get_payload_as_bytes()
-                receiver.ack(msg)
-                yield payload
-            except Exception as e:
-                print(f"[solace-source] Receive error: {e}")
-                time.sleep(1)
-    finally:
-        receiver.terminate()
-        service.disconnect()
-
-
-def _build_solace_source(env: StreamExecutionEnvironment):
-    return (
-        env.from_collection(_solace_event_iter(), type_info=Types.PICKLED_BYTE_ARRAY())
-        .name("solace-pubsubplus-source")
-        .set_parallelism(1)  # single consumer per durable exclusive queue
-    )
-
-
-# -- Redis Streams source (default, no broker needed) -------------------------
+# -- Redis Streams source -----------------------------------------------------
+# NOTE: Solace → Redis is handled by the standalone_consumer (solace-pubsubplus
+# Python SDK works perfectly there). PyFlink reads from Redis Streams because
+# env.from_collection() with a blocking generator is evaluated at submission
+# time in PyFlink 2.0, which deadlocks before the job graph is ever built.
 
 def _redis_event_iter():
-    """Blocking generator that yields raw event bytes from a Redis Stream."""
+    """Yields raw event bytes from Redis Stream via a background thread.
+
+    PyFlink 2.0's from_collection() materialises the iterator immediately on
+    the client before submitting the job graph, so a blocking xread() call
+    would deadlock. We run the blocking read in a daemon thread and drain a
+    queue with a non-blocking sentinel-terminated iterator so from_collection
+    can serialise the stream and hand it to the TaskManagers.
+    """
+    import queue as _q
+    import threading
     import redis
-    rc = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=False)
-    last_id = "0"
+
+    buf: _q.Queue = _q.Queue(maxsize=2000)
+    _STOP = object()
+
+    def _reader():
+        rc = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=False)
+        last_id = "$"  # only new messages — TaskManagers handle processing
+        while True:
+            try:
+                results = rc.xread({REDIS_STREAM_KEY: last_id}, count=200, block=1000)
+                if not results:
+                    continue
+                messages = results[0][1]
+                last_id = messages[-1][0]
+                if isinstance(last_id, bytes):
+                    last_id = last_id.decode()
+                for _, fields in messages:
+                    buf.put(fields[b"data"])
+            except Exception as e:
+                print(f"[redis-source] XREAD error: {e}")
+                time.sleep(1)
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+
     while True:
         try:
-            results = rc.xread({REDIS_STREAM_KEY: last_id}, count=200, block=1000)
-            if not results:
-                continue
-            messages = results[0][1]
-            last_id = messages[-1][0]
-            if isinstance(last_id, bytes):
-                last_id = last_id.decode()
-            for _, fields in messages:
-                yield fields[b"data"]
-        except Exception as e:
-            print(f"[redis-source] XREAD error: {e}")
-            time.sleep(1)
+            yield buf.get(timeout=2)
+        except _q.Empty:
+            continue
 
 
 def _build_redis_stream_source(env: StreamExecutionEnvironment):
     return (
         env.from_collection(_redis_event_iter(), type_info=Types.PICKLED_BYTE_ARRAY())
         .name("redis-stream-source")
-        .set_parallelism(1)  # single reader -- Redis Streams is not partitioned
+        .set_parallelism(1)
     )
 
 
@@ -250,13 +218,10 @@ def build_pipeline(local: bool = False) -> None:
     env.set_parallelism(parallelism)
 
     # -- Source ---------------------------------------------------------------
-    solace_host = os.getenv("SOLACE_HOST")
-    if solace_host:
-        print(f"[pipeline] Using Solace source at {solace_host}")
-        raw_stream = _build_solace_source(env)
-    else:
-        print("[pipeline] SOLACE_HOST not set -- using Redis Streams source")
-        raw_stream = _build_redis_stream_source(env)
+    # Always read from Redis Streams. When SOLACE_HOST is set, the standalone
+    # consumer bridges Solace → Redis so data flows end-to-end.
+    print("[pipeline] Reading from Redis Streams source")
+    raw_stream = _build_redis_stream_source(env)
 
     # -- Stage 1: Normalize (stateless) ---------------------------------------
     normalized = (

@@ -74,7 +74,10 @@ def run_consumer(use_s3: bool = False) -> None:
     processed = 0
     fv_emitted = 0
 
-    print(f"[consumer] Reading from Redis stream '{REDIS_STREAM_KEY}' at {redis_url}")
+    if solace_receiver:
+        print(f"[consumer] Transport: Solace → Redis Streams bridge active")
+    else:
+        print(f"[consumer] Transport: Redis Streams at {redis_url}")
     print("[consumer] Waiting for events…")
 
     while _running:
@@ -137,7 +140,7 @@ def _stream_read(rc, last_id: str):
         return [], last_id
 
 
-# ── Optional Solace integration ───────────────────────────────────────────────
+# Solace integration 
 
 def _build_solace_receiver():
     import time
@@ -178,9 +181,17 @@ def _solace_batch(receiver_tuple):
     msg = recv.receive_message(timeout=1_000)
     if msg is None:
         return []
+    # Try string payload first (Solace text messages), fallback to bytes
+    try:
+        payload = msg.get_payload_as_string()
+        if payload:
+            recv.ack(msg)
+            return [payload.encode("utf-8")]
+    except Exception:
+        pass
     payload = msg.get_payload_as_bytes()
     recv.ack(msg)
-    return [payload]
+    return [payload] if payload else []
 
 
 if __name__ == "__main__":
