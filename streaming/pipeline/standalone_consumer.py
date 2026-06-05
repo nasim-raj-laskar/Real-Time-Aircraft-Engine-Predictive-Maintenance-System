@@ -58,7 +58,7 @@ def run_consumer(use_s3: bool = False) -> None:
 
     # Redis stream client
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    rc = _redis.from_url(redis_url, decode_responses=False)
+    rc = _redis.from_url(redis_url, decode_responses=False, socket_keepalive=True, socket_connect_timeout=5, health_check_interval=30)
     try:
         rc.ping()
     except Exception as e:
@@ -70,14 +70,18 @@ def run_consumer(use_s3: bool = False) -> None:
     if os.getenv("SOLACE_HOST"):
         solace_receiver = _build_solace_receiver()
 
-    last_id = "0"  # start from beginning of stream
+    # Start from "0" to drain the current stream and warm up the 30-cycle rolling
+    # windows for every engine. Once the backlog is empty (xread returns nothing),
+    # we switch to "$" so only new messages are read going forward.
+    last_id = "0"
+    warmed_up = False
     processed = 0
     fv_emitted = 0
 
     if solace_receiver:
         print(f"[consumer] Transport: Solace → Redis Streams bridge active")
     else:
-        print(f"[consumer] Transport: Redis Streams at {redis_url}")
+        print(f"[consumer] Transport: Redis Streams at {redis_url} (warming up windows…)")
     print("[consumer] Waiting for events…")
 
     while _running:
@@ -85,6 +89,11 @@ def run_consumer(use_s3: bool = False) -> None:
             batch = _solace_batch(solace_receiver)
         else:
             batch, last_id = _stream_read(rc, last_id)
+            # Switch to live tail once backlog is drained
+            if not warmed_up and not batch:
+                warmed_up = True
+                last_id = "$"
+                print(f"[consumer] Windows warmed up ({len(windower.active_engines())} engines). Switching to live tail.")
 
         if not batch:
             continue
@@ -137,10 +146,7 @@ def _stream_read(rc, last_id: str):
         return payloads, new_last_id
     except Exception as e:
         print(f"[consumer] Stream read error: {e}", file=sys.stderr)
-        return [], last_id
-
-
-# Solace integration 
+        return [], last_id 
 
 def _build_solace_receiver():
     import time

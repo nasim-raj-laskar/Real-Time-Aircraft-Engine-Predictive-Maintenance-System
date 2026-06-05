@@ -15,6 +15,9 @@ services:
       - ./reports:/app/reports
     environment:
       REDIS_URL: redis://redis:6379/0
+      WS_PREDICTION_INTERVAL: "2"
+      WS_TELEMETRY_INTERVAL: "1"
+      WS_ALERTS_INTERVAL: "2"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -169,19 +172,12 @@ services:
       dockerfile: Dockerfile.streaming
     container_name: aircraft-consumer
     env_file: .env
-    command: python3 -m streaming.pipeline.standalone_consumer --s3
+    command: python3 -m streaming.pipeline.standalone_consumer
     environment:
       REDIS_URL: redis://redis:6379/0
       S3_BUCKET: ${AWS_S3_BUCKET:-aircraft-engine-data}
       FLUSH_EVERY: "500"
-      SOLACE_HOST: tcp://solace:55555
-      SOLACE_VPN: default
-      SOLACE_USERNAME: admin
-      SOLACE_PASSWORD: admin
-      SOLACE_QUEUE_NAME: flink.feature.processor
     depends_on:
-      solace:
-        condition: service_started
       redis:
         condition: service_healthy
     healthcheck:
