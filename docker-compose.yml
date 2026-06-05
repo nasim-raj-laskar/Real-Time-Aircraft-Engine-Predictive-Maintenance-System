@@ -137,13 +137,9 @@ services:
     command: python3 -m streaming.producer.telemetry_producer --dataset artifacts/data_ingestion/data/train_FD001.txt --throttle 50
     environment:
       REDIS_URL: redis://redis:6379/0
-      SOLACE_HOST: tcp://solace:55555
-      SOLACE_VPN: default
-      SOLACE_USERNAME: admin
-      SOLACE_PASSWORD: admin
     depends_on:
-      solace-provisioner:
-        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - aircraft-network
