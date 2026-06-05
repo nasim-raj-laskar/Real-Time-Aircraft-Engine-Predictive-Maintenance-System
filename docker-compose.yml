@@ -90,8 +90,8 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
         execution.checkpointing.interval: 30000
-        state.backend: rocksdb
-        state.checkpoints.dir: s3://aircraft-engine-data/flink-checkpoints/
+        state.backend: hashmap
+        state.checkpoints.dir: file:///tmp/flink-checkpoints
         python.executable: python3
     volumes:
       - flink-jars:/opt/flink/lib/extra
@@ -115,8 +115,8 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
         taskmanager.memory.process.size: 2g
-        state.backend: rocksdb
-        state.checkpoints.dir: s3://aircraft-engine-data/flink-checkpoints/
+        state.backend: hashmap
+        state.checkpoints.dir: file:///tmp/flink-checkpoints
         python.executable: python3
     volumes:
       - flink-jars:/opt/flink/lib/extra
@@ -210,21 +210,18 @@ services:
       - |
         echo '[submitter] Waiting for Flink JobManager...' &&
         until curl -sf http://flink-jobmanager:8081/overview; do sleep 3; done &&
-        echo '[submitter] Submitting PyFlink job...' &&
-        cd /app && flink run -m flink-jobmanager:8081 -py streaming/pipeline/telemetry_pipeline.py --parallelism 4 -pyfs /app &&
-        echo '[submitter] Job submitted successfully.'
+        while true; do
+          echo '[submitter] Submitting PyFlink batch job...' &&
+          cd /app && flink run -m flink-jobmanager:8081 -py streaming/pipeline/telemetry_pipeline.py --parallelism 4 -pyfs /app &&
+          echo '[submitter] Batch done. Sleeping 30s...' &&
+          sleep 30
+        done
     environment:
       REDIS_URL: redis://redis:6379/0
       FLINK_HOME: /opt/flink
       PYFLINK_PYTHON: /app/.venv/bin/python3
-      SOLACE_HOST: tcp://solace:55555
-      SOLACE_VPN: default
-      SOLACE_USERNAME: admin
-      SOLACE_PASSWORD: admin
-      SOLACE_QUEUE_NAME: flink.feature.processor
-      ENABLE_S3_SINK: "true"
+      ENABLE_S3_SINK: "false"
       FLUSH_EVERY: "500"
-      FLINK_CHECKPOINT_DIR: s3://aircraft-engine-data/flink-checkpoints/
     depends_on:
       flink-jobmanager:
         condition: service_healthy

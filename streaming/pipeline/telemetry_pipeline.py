@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 from pyflink.datastream import StreamExecutionEnvironment, CheckpointingMode
-from pyflink.datastream.functions import MapFunction, KeyedProcessFunction, SinkFunction, RuntimeContext
+from pyflink.datastream.functions import MapFunction, KeyedProcessFunction, RuntimeContext
 from pyflink.datastream.state import ListStateDescriptor, ValueStateDescriptor
 from pyflink.common.typeinfo import Types
 
@@ -100,38 +100,34 @@ class RollingWindowProcess(KeyedProcessFunction):
 
 # -- Sink 1: Redis online feature store ---------------------------------------
 
-class RedisSinkFunction(SinkFunction):
-    """Writes each FeatureVector to Redis. One connection pool per TaskManager."""
+class RedisSinkFunction(MapFunction):
+    """Writes each FeatureVector to Redis via MapFunction (SinkFunction is a
+    JavaFunctionWrapper in PyFlink 2.0 and cannot be subclassed in Python)."""
 
     def open(self, runtime_context: RuntimeContext):
         self._sink = RedisSink(redis_url=os.getenv("REDIS_URL"))
 
-    def invoke(self, fv: FeatureVector, context):
+    def map(self, fv: FeatureVector):
         self._sink.write(fv)
-
-    def close(self):
-        self._sink.close()
+        return fv
 
 
-# -- Sink 2: S3 Parquet offline store (checkpoint-aligned flush) --------------
+# -- Sink 2: S3 Parquet offline store -----------------------------------------
 
-class S3CheckpointSink(SinkFunction):
-    """Buffers FeatureVectors and flushes to S3 Parquet on finish() (per checkpoint)."""
+class S3CheckpointSink(MapFunction):
+    """Buffers FeatureVectors and flushes to S3 Parquet."""
 
     def open(self, runtime_context: RuntimeContext):
         self._sink = S3ParquetSink()
         self._count = 0
 
-    def invoke(self, fv: FeatureVector, context):
+    def map(self, fv: FeatureVector):
         self._sink.add(fv)
         self._count += 1
         if self._count % _FLUSH_EVERY == 0:
             n = self._sink.flush()
             print(f"[s3-sink] Flushed {n} records to Parquet")
-
-    def close(self):
-        self._sink.close()
-
+        return fv
 
 # -- Redis Streams source -----------------------------------------------------
 # NOTE: Solace → Redis is handled by the standalone_consumer (solace-pubsubplus
@@ -140,52 +136,20 @@ class S3CheckpointSink(SinkFunction):
 # time in PyFlink 2.0, which deadlocks before the job graph is ever built.
 
 def _redis_event_iter():
-    """Yields raw event bytes from Redis Stream via a background thread.
-
-    PyFlink 2.0's from_collection() materialises the iterator immediately on
-    the client before submitting the job graph, so a blocking xread() call
-    would deadlock. We run the blocking read in a daemon thread and drain a
-    queue with a non-blocking sentinel-terminated iterator so from_collection
-    can serialise the stream and hand it to the TaskManagers.
-    """
-    import queue as _q
-    import threading
+    """Fetch one batch of messages from Redis Streams (non-blocking, finite)."""
     import redis
-
-    buf: _q.Queue = _q.Queue(maxsize=2000)
-    _STOP = object()
-
-    def _reader():
-        rc = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=False)
-        last_id = "$"  # only new messages — TaskManagers handle processing
-        while True:
-            try:
-                results = rc.xread({REDIS_STREAM_KEY: last_id}, count=200, block=1000)
-                if not results:
-                    continue
-                messages = results[0][1]
-                last_id = messages[-1][0]
-                if isinstance(last_id, bytes):
-                    last_id = last_id.decode()
-                for _, fields in messages:
-                    buf.put(fields[b"data"])
-            except Exception as e:
-                print(f"[redis-source] XREAD error: {e}")
-                time.sleep(1)
-
-    t = threading.Thread(target=_reader, daemon=True)
-    t.start()
-
-    while True:
-        try:
-            yield buf.get(timeout=2)
-        except _q.Empty:
-            continue
+    rc = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=False)
+    results = rc.xread({REDIS_STREAM_KEY: "0"}, count=5000)
+    if not results:
+        return
+    for _, fields in results[0][1]:
+        raw = fields[b"data"]
+        yield raw.decode("utf-8") if isinstance(raw, bytes) else raw
 
 
 def _build_redis_stream_source(env: StreamExecutionEnvironment):
     return (
-        env.from_collection(_redis_event_iter(), type_info=Types.PICKLED_BYTE_ARRAY())
+        env.from_collection(list(_redis_event_iter()), type_info=Types.STRING())
         .name("redis-stream-source")
         .set_parallelism(1)
     )
@@ -204,15 +168,13 @@ def build_pipeline(local: bool = False) -> None:
 
     # RocksDB state backend for production (heap is fine for local dev)
     if not local:
-        checkpoint_dir = os.getenv(
-            "FLINK_CHECKPOINT_DIR",
-            "s3://aircraft-engine-data/flink-checkpoints/"
-        )
-        try:
-            from pyflink.datastream.state_backend import RocksDBStateBackend
-            env.set_state_backend(RocksDBStateBackend(checkpoint_dir, incremental_checkpoints=True))
-        except Exception as e:
-            print(f"[pipeline] RocksDB backend unavailable, using heap: {e}")
+        checkpoint_dir = os.getenv("FLINK_CHECKPOINT_DIR")
+        if checkpoint_dir:
+            try:
+                from pyflink.datastream.state_backend import RocksDBStateBackend
+                env.set_state_backend(RocksDBStateBackend(checkpoint_dir, incremental_checkpoints=True))
+            except Exception as e:
+                print(f"[pipeline] RocksDB backend unavailable, using heap: {e}")
 
     parallelism = int(os.getenv("FLINK_PARALLELISM", "4" if not local else "1"))
     env.set_parallelism(parallelism)
@@ -239,14 +201,12 @@ def build_pipeline(local: bool = False) -> None:
     )
 
     # -- Sink 1: Redis online feature store -----------------------------------
-    features.add_sink(RedisSinkFunction()).name("redis-online-feature-sink")
+    written = features.map(RedisSinkFunction(), output_type=Types.PICKLED_BYTE_ARRAY()).name("redis-online-feature-sink")
 
     # -- Sink 2: S3 Parquet offline store -------------------------------------
     use_s3 = os.getenv("ENABLE_S3_SINK", "false").lower() == "true"
     if use_s3:
-        features.add_sink(S3CheckpointSink()).name("s3-parquet-offline-sink")
-    else:
-        print("[pipeline] S3 sink disabled (set ENABLE_S3_SINK=true to enable)")
+        written.map(S3CheckpointSink(), output_type=Types.PICKLED_BYTE_ARRAY()).name("s3-parquet-offline-sink")
 
     env.execute("Aircraft Telemetry Feature Pipeline")
 
