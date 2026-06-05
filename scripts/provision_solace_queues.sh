@@ -49,7 +49,9 @@ create_queue() {
       \"permission\": \"consume\",
       \"ingressEnabled\": true,
       \"egressEnabled\": true,
-      \"maxMsgSpoolUsage\": 5000,
+      \"maxMsgSpoolUsage\": 512,
+      \"maxTtl\": 60,
+      \"respectTtlEnabled\": true,
       \"replayStartLocation\": \"beginning\"
       ${extra}
     }")

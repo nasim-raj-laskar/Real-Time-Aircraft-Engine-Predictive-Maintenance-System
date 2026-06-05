@@ -134,7 +134,7 @@ services:
       dockerfile: Dockerfile.streaming
     container_name: aircraft-producer
     env_file: .env
-    command: python3 -m streaming.producer.telemetry_producer --dataset artifacts/data_ingestion/data/train_FD001.txt --throttle 50
+    command: python3 -m streaming.producer.telemetry_producer --dataset artifacts/data_ingestion/data/train_FD001.txt --throttle 500
     environment:
       REDIS_URL: redis://redis:6379/0
       SOLACE_HOST: tcp://solace:55555
