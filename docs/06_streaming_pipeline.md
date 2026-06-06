@@ -323,7 +323,7 @@ Stateless MinMax normalization. Loads `scaler_params.csv` once at operator const
 
 ```mermaid
 flowchart LR
-    CSV["scaler_params.csv\nrow 0: min values [11]\nrow 1: max values [11]"] -->|loaded once in open()| NF
+    CSV["scaler_params.csv\nrow 0: min values [11]\nrow 1: max values [11]"] -->|loaded once in open| NF
 
     NF["NormalizeMap\nfor each sensor i:\nnorm = (raw - min_i) / (max_i - min_i + ε)\nclamp to [0.0, 1.0]"]
 
@@ -354,10 +354,25 @@ Writes each `FeatureVector` atomically using a Jedis pipeline (batched Redis com
 ```mermaid
 erDiagram
     REDIS_KEYS {
-        bytes "engine:ENG-042:features" "330 big-endian float32 values (30x11 = 1320 bytes) · TTL 3600s"
-        hash  "engine:ENG-042:meta"     "engine_id · cycle · event_time · window_size · n_sensors · TTL 3600s"
+        bytes engine_features
+        hash engine_meta
     }
 ```
+
+- `engine_features`
+  - Key: `engine:ENG-042:features`
+  - Value: 330 big-endian float32 values (30x11 = 1320 bytes)
+  - TTL: 3600s
+
+- `engine_meta`
+  - Key: `engine:ENG-042:meta`
+  - Fields:
+    - engine_id
+    - cycle
+    - event_time
+    - window_size
+    - n_sensors
+  - TTL: 3600s
 
 **Write pattern:**
 
